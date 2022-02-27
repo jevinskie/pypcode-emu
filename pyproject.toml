@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "pypcode_emu"
+version = "0.1.0"
+description = "pypcode-emu - Ghidra P-Code emulation in Python"
+authors = ["Jevin Sweval <jevinsweval@gmail.com>"]
+
+[tool.poetry.scripts]
+pypcode-emu = 'pypcode_emu.tools.pypcode_emu:main'
+
+[tool.poe.tasks]
+test = "pytest"
+test-v = "pytest -vvvv"
+test-vv = "pytest -vvvv --capture=tee-sys"
+ipy = "ipython"
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=append"
+testpaths = [
+    "tests",
+]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+rich = "^11.2.0"
+attrs = "^21.4.0"
+typing-extensions = "^4.1.0"
+nativetypes = "^1.0.4"
+pypcode = {git = "https://github.com/jevinskie/pypcode"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.1"
+poethepoet = "^0.12.3"
+pytest-clarity = "^1.0.1"
+pytest-pycharm = "^0.7.0"
+pytest-randomly = "^3.11.0"
+pytest-cov = "^3.0.0"
+mypy = "^0.931"
+ipython = "^8.0.1"
+black = "^22.1.0"
+isort = "^5.10.1"
+pre-commit = "^2.17.0"
+
+[tool.isort]
+profile = "black"
+
+[build-system]
+requires = ["poetry-core @ git+https://github.com/jevinskie/poetry-core@jev/main"]
+build-backend = "poetry.core.masonry.api"
