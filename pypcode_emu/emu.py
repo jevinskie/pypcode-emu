@@ -4,17 +4,37 @@ from elftools.elf.elffile import ELFFile
 from pypcode import Arch, Context, PcodePrettyPrinter
 
 
+class VarNode:
+    def __init__(self):
+        pass
+
+
+class Instr:
+    def __init__(self):
+        pass
+
+
 class PCodeEmu:
     def __init__(self, spec: str, base: int = 0):
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
         self.base = base
         self.ram = mmap.mmap(-1, 0xFFFF_FFFF)
-        self.ctx = Context(spec)
+        langs = {l.id: l for arch in Arch.enumerate() for l in arch.languages}
+        self.ctx = Context(langs[spec])
 
     def translate(self, addr: int):
         res = self.ctx.translate(self.ram[addr : addr + 4], self.base, 1)
-        print(res)
+        for insn in res.instructions:
+            print("-" * 80)
+            print(
+                "%08x/%d: %s %s"
+                % (insn.address.offset, insn.length, insn.asm_mnem, insn.asm_body)
+            )
+            print("-" * 80)
+            for op in insn.ops:
+                print("%3d: %s" % (op.seq.uniq, str(op)))
+            print("")
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
