@@ -15,9 +15,7 @@ class PCodeEmu:
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
         langs = {l.id: l for arch in Arch.enumerate() for l in arch.languages}
-        print(f"prefuck2 {spec} {entry} {langs[spec]}")
         self.ctx = Context(langs[spec])
-        print("fuck2")
         self.entry = entry
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = mmap.mmap(-1, 0xFFFF_FFFF)
@@ -40,9 +38,7 @@ class PCodeEmu:
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
         assert sym is not None
         sz = int(sym["size"])
-        space = first_where_key_is(
-            self.sla.sleigh.spaces.space, "name", self.sla.spacessym["space"]
-        )
+        space = first_where_key_is(self.sla.sleigh.spaces.space, "name", sym["space"])
         bigendian = space["bigendian"] == "true"
         space_buf = self.spaces[sym["space"]]
         off = int(sym["offset"], 16)
@@ -117,9 +113,7 @@ class ELFPCodeEmu(PCodeEmu):
             pass
         elif isinstance(entry, str):
             entry = first_where_attr_is(self.lelf.symbols, "name", entry).value
-        print("prefuck")
         super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
-        print("fuck")
         for seg_idx in range(self.elf.num_segments()):
             seg = self.elf.get_segment(seg_idx)
             if seg.header.p_type != "PT_LOAD":
