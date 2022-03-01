@@ -10,3 +10,7 @@ def first_where(iterable, pred, default=None):
 
 def first_where_key_is(iterable, key, val, default=None):
     return first_where(iterable, lambda x: x[key] == val, default=default)
+
+
+def first_where_attr_is(iterable, key, val, default=None):
+    return first_where(iterable, lambda x: getattr(x, key) == val, default=default)

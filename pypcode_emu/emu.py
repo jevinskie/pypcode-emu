@@ -1,8 +1,10 @@
 import mmap
 import struct
+from typing import Optional, Union
 
 import untangle
 from elftools.elf.elffile import ELFFile
+from lief import ELF
 from pypcode import Arch, Context, PcodePrettyPrinter
 
 from pypcode_emu.utils import *
@@ -13,7 +15,9 @@ class PCodeEmu:
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
         langs = {l.id: l for arch in Arch.enumerate() for l in arch.languages}
+        print(f"prefuck2 {spec} {entry} {langs[spec]}")
         self.ctx = Context(langs[spec])
+        print("fuck2")
         self.entry = entry
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = mmap.mmap(-1, 0xFFFF_FFFF)
@@ -85,9 +89,17 @@ class PCodeEmu:
         print("")
 
 
+class RawBinaryPCodeEmu(PCodeEmu):
+    def __init__(self, spec: str, bin_path: str, base: int = 0, entry: int = 0):
+        super().__init__(spec, entry)
+        self.bin = open(bin_path, "rb").read()
+        self.memcpy(base, self.bin)
+
+
 class ELFPCodeEmu(PCodeEmu):
-    def __init__(self, elf_path: str):
+    def __init__(self, elf_path: str, entry: Optional[Union[str, int]] = None):
         self.elf = ELFFile(open(elf_path, "rb"))
+        self.lelf = ELF.parse(elf_path)
         machine = {
             "EM_MICROBLAZE": "mb",
         }[self.elf.header.e_machine]
@@ -99,7 +111,15 @@ class ELFPCodeEmu(PCodeEmu):
             "ELFCLASS32": "32",
             "ELFCLASS64": "64",
         }[self.elf.header.e_ident["EI_CLASS"]]
-        super().__init__(f"{machine}:{endianness}:{bitness}:default")
+        if entry is None:
+            entry = self.elf.header.e_entry
+        elif isinstance(entry, int):
+            pass
+        elif isinstance(entry, str):
+            entry = first_where_attr_is(self.lelf.symbols, "name", entry).value
+        print("prefuck")
+        super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
+        print("fuck")
         for seg_idx in range(self.elf.num_segments()):
             seg = self.elf.get_segment(seg_idx)
             if seg.header.p_type != "PT_LOAD":
