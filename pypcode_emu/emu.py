@@ -87,10 +87,9 @@ class PCodeEmu:
         for insn in instr:
             print("-" * 80)
             print(
-                "%08x[%s]/%d: %s %s"
+                "%08x/%d: %s %s"
                 % (
                     insn.address.offset,
-                    insn.address.space,
                     insn.length,
                     insn.asm_mnem,
                     insn.asm_body,
@@ -98,7 +97,10 @@ class PCodeEmu:
             )
             print("-" * 80)
             for op in insn.ops:
-                print("%3d: %s" % (op.seq.uniq, str(op)))
+                print("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
+                print("\t\t%s" % str(op))
+                # print("%3d: %s" % (op.seq.uniq, str(op)))
+                # print('\t%s' % PcodePrettyPrinter.fmt_op(op))
             print("")
 
 
