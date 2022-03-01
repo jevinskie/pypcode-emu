@@ -63,7 +63,9 @@ class PCodeEmu:
     def translate(self, addr: int):
         if addr in self.inst_cache:
             return self.inst_cache[addr]
-        res = self.ctx.translate(self.ram[addr : addr + 4], addr, 1)
+        res = self.ctx.translate(
+            self.ram[addr : addr + 4], addr, 1, max_bytes=4, bb_terminating=True
+        )
         assert len(res.instructions) == 1
         insn = res.instructions[0]
         self.inst_cache[addr] = insn
