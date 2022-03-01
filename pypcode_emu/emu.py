@@ -112,7 +112,10 @@ class ELFPCodeEmu(PCodeEmu):
         elif isinstance(entry, int):
             pass
         elif isinstance(entry, str):
-            entry = first_where_attr_is(self.lelf.symbols, "name", entry).value
+            try:
+                entry = int(entry, 0)
+            except ValueError:
+                entry = first_where_attr_is(self.lelf.symbols, "name", entry).value
         super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
         for seg_idx in range(self.elf.num_segments()):
             seg = self.elf.get_segment(seg_idx)

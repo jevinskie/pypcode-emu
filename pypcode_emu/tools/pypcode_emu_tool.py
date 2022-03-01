@@ -9,7 +9,7 @@ def real_main(args):
     try:
         emu = ELFPCodeEmu(args.binary, args.entry)
     except ELFError:
-        emu = PCodeEmu(args.spec, args.binary, args.base, args.entry)
+        emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
     i = emu.translate(emu.entry)
     emu.dump_instr(i)
 
@@ -20,10 +20,9 @@ def main() -> int:
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
     parser.add_argument("-s", "--spec", help="Specification", metavar="SPEC")
     parser.add_argument(
-        "-b", "--base", type=lambda x: int(x, 16), help="Base address", metavar="BASE"
+        "-b", "--base", type=lambda x: int(x, 0), help="Base address", metavar="BASE"
     )
     args = parser.parse_args()
-    print(f"args: {args}")
     real_main(args)
     return 0
 
