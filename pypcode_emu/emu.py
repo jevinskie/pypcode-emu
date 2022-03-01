@@ -29,36 +29,6 @@ def sext64(v):
     return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
 
 
-def emu_pcodeop(emu: PCodeEmu, op: PcodeOp):
-    opc = op.opcode
-    d = op.output
-    # ds = setter_for_varnode(d)
-    ninputs = len(op.inputs)
-    if ninputs >= 1:
-        a = op.inputs[0]
-        # av = value_for_varnode(a)
-    if ninputs >= 2:
-        b = op.inputs[1]
-        # bv = value_for_varnode(b)
-
-    if opc is OpCode.INT_SEXT:
-        pass
-    elif opc is OpCode.INT_ADD:
-        pass
-    elif opc is OpCode.STORE:
-        pass
-    elif opc is OpCode.INT_EQUAL:
-        pass
-    elif opc is OpCode.CBRANCH:
-        pass
-    elif opc is OpCode.LOAD:
-        pass
-    elif opc is OpCode.BRANCHIND:
-        pass
-    else:
-        raise NotImplementedError(str(op))
-
-
 class PCodeEmu:
     def __init__(self, spec: str, entry: int = 0):
         arch, endianness, bitness, _ = spec.split(":")
@@ -128,6 +98,35 @@ class PCodeEmu:
             assert a.offset not in self.inst_cache
             self.inst_cache[a.offset] = insn
         return res.instructions
+
+    def emu_pcodeop(self, op: PcodeOp):
+        opc = op.opcode
+        d = op.output
+        # ds = setter_for_varnode(d)
+        ninputs = len(op.inputs)
+        if ninputs >= 1:
+            a = op.inputs[0]
+            # av = value_for_varnode(a)
+        if ninputs >= 2:
+            b = op.inputs[1]
+            # bv = value_for_varnode(b)
+
+        if opc is OpCode.INT_SEXT:
+            pass
+        elif opc is OpCode.INT_ADD:
+            pass
+        elif opc is OpCode.STORE:
+            pass
+        elif opc is OpCode.INT_EQUAL:
+            pass
+        elif opc is OpCode.CBRANCH:
+            pass
+        elif opc is OpCode.LOAD:
+            pass
+        elif opc is OpCode.BRANCHIND:
+            pass
+        else:
+            raise NotImplementedError(str(op))
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
