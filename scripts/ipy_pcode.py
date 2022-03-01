@@ -4,7 +4,7 @@ import argparse
 
 from elftools.elf.elffile import ELFError
 
-from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
+from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu, emu_pcodeop
 
 parser = argparse.ArgumentParser()
 parser.add_argument("binary", help="Input binary file (binary/ELF)", metavar="BIN")
@@ -18,4 +18,7 @@ try:
     emu = ELFPCodeEmu(args.binary, args.entry)
 except ELFError:
     emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
-instr = emu.translate(emu.entry)
+instrs = emu.translate(emu.entry)
+for i in instrs:
+    for op in i.ops:
+        emu_pcodeop(emu, op)

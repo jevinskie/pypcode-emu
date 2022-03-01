@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import mmap
 import struct
@@ -6,9 +8,45 @@ from typing import Optional, Sequence, Union
 import untangle
 from elftools.elf.elffile import ELFFile
 from lief import ELF
-from pypcode import Arch, Context, PcodePrettyPrinter, Translation
+from pypcode import Arch, Context, OpCode, PcodeOp, PcodePrettyPrinter, Translation
 
 from pypcode_emu.utils import *
+
+
+def sext8(v):
+    return (v & ((1 << (8 - 1)) - 1)) - (v & (1 << (8 - 1)))
+
+
+def sext16(v):
+    return (v & ((1 << (16 - 1)) - 1)) - (v & (1 << (16 - 1)))
+
+
+def sext32(v):
+    return (v & ((1 << (32 - 1)) - 1)) - (v & (1 << (32 - 1)))
+
+
+def sext64(v):
+    return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
+
+
+def emu_pcodeop(emu: PCodeEmu, op: PcodeOp):
+    opc = op.opcode
+    if opc is OpCode.INT_SEXT:
+        pass
+    elif opc is OpCode.INT_ADD:
+        pass
+    elif opc is OpCode.STORE:
+        pass
+    elif opc is OpCode.INT_EQUAL:
+        pass
+    elif opc is OpCode.CBRANCH:
+        pass
+    elif opc is OpCode.LOAD:
+        pass
+    elif opc is OpCode.BRANCHIND:
+        pass
+    else:
+        raise NotImplementedError(str(op))
 
 
 class PCodeEmu:
