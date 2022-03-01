@@ -31,6 +31,16 @@ def sext64(v):
 
 def emu_pcodeop(emu: PCodeEmu, op: PcodeOp):
     opc = op.opcode
+    d = op.output
+    # ds = setter_for_varnode(d)
+    ninputs = len(op.inputs)
+    if ninputs >= 1:
+        a = op.inputs[0]
+        # av = value_for_varnode(a)
+    if ninputs >= 2:
+        b = op.inputs[1]
+        # bv = value_for_varnode(b)
+
     if opc is OpCode.INT_SEXT:
         pass
     elif opc is OpCode.INT_ADD:
@@ -64,6 +74,8 @@ class PCodeEmu:
             "register": self.register,
         }
         self.ram_space = self.ctx.spaces["ram"]
+        self.unique_space = self.ctx.spaces["unique"]
+        self.register_space = self.ctx.spaces["register"]
         self.inst_cache = {}
         self.bb_cache = {}
         reg_names = self.ctx.get_register_names()
