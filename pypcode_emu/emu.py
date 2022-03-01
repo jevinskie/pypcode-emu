@@ -22,10 +22,11 @@ class PCodeEmu:
         self.ram = memoryview(mmap.mmap(-1, 0xFFFF_FFFF))
         self.register = memoryview(mmap.mmap(-1, 0x1000))
         self.spacename2raw = {}
-        self.spaces = {
+        self.space_bufs = {
             "ram": self.ram,
             "register": self.register,
         }
+        self.ram_space = self.ctx.spaces["ram"]
         (
             self.pc_space,
             self.pc_off,
@@ -43,7 +44,7 @@ class PCodeEmu:
         sz = int(sym["size"])
         space = first_where_key_is(self.sla.sleigh.spaces.space, "name", sym["space"])
         bigendian = space["bigendian"] == "true"
-        space_buf = self.spaces[sym["space"]]
+        space_buf = self.space_bufs[sym["space"]]
         off = int(sym["offset"], 16)
 
         struct_fmt = (">" if bigendian else "<") + {
@@ -71,10 +72,11 @@ class PCodeEmu:
         self.bb_cache[addr] = res.instructions
         for insn in res.instructions:
             a = insn.address
-            print(f"space: {a.space}")
-        # assert len(res.instructions) == 1
-        # insn = res.instructions[0]
-        # self.inst_cache[addr] = insn
+            # FIXME: probably useless
+            assert a.space is self.ram_space
+            # FIXME: might be wrong
+            assert a.offset not in self.inst_cache
+            self.inst_cache[a.offset] = insn
         return res.instructions
 
     def memcpy(self, addr: int, buf: bytes) -> None:

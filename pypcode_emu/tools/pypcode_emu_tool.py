@@ -15,7 +15,7 @@ def real_main(args):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ps3mfw")
+    parser = argparse.ArgumentParser(description="pypcode-emu")
     parser.add_argument("binary", help="Input binary file (binary/ELF)", metavar="BIN")
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
     parser.add_argument("-s", "--spec", help="Specification", metavar="SPEC")
