@@ -1,11 +1,12 @@
+import collections
 import mmap
 import struct
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import untangle
 from elftools.elf.elffile import ELFFile
 from lief import ELF
-from pypcode import Arch, Context, PcodePrettyPrinter
+from pypcode import Arch, Context, PcodePrettyPrinter, Translation
 
 from pypcode_emu.utils import *
 
@@ -18,8 +19,9 @@ class PCodeEmu:
         self.ctx = Context(langs[spec])
         self.entry = entry
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
-        self.ram = mmap.mmap(-1, 0xFFFF_FFFF)
-        self.register = mmap.mmap(-1, 0x1000)
+        self.ram = memoryview(mmap.mmap(-1, 0xFFFF_FFFF))
+        self.register = memoryview(mmap.mmap(-1, 0x1000))
+        self.spacename2raw = {}
         self.spaces = {
             "ram": self.ram,
             "register": self.register,
@@ -33,6 +35,7 @@ class PCodeEmu:
         self.pc = property(self.pc_getter, self.pc_setter)
         self.pc = self.entry
         self.inst_cache = {}
+        self.bb_cache = {}
 
     def get_varnode_sym_info(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
@@ -61,30 +64,42 @@ class PCodeEmu:
         return space, off, getter, setter
 
     def translate(self, addr: int):
-        if addr in self.inst_cache:
-            return self.inst_cache[addr]
-        res = self.ctx.translate(
-            self.ram[addr : addr + 4], addr, 1, max_bytes=4, bb_terminating=True
-        )
-        assert len(res.instructions) == 1
-        insn = res.instructions[0]
-        self.inst_cache[addr] = insn
-        return insn
+        if addr in self.bb_cache:
+            return self.bb_cache[addr]
+        res = self.ctx.translate(self.ram[addr:], addr, bb_terminating=True)
+        assert res.error is None
+        self.bb_cache[addr] = res.instructions
+        for insn in res.instructions:
+            a = insn.address
+            print(f"space: {a.space}")
+        # assert len(res.instructions) == 1
+        # insn = res.instructions[0]
+        # self.inst_cache[addr] = insn
+        return res.instructions
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
 
     @staticmethod
-    def dump_instr(insn):
-        print("-" * 80)
-        print(
-            "%08x/%d: %s %s"
-            % (insn.address.offset, insn.length, insn.asm_mnem, insn.asm_body)
-        )
-        print("-" * 80)
-        for op in insn.ops:
-            print("%3d: %s" % (op.seq.uniq, str(op)))
-        print("")
+    def dump(instr: Union[Translation, Sequence[Translation]]):
+        if not isinstance(instr, collections.Sequence):
+            instr = (instr,)
+        for insn in instr:
+            print("-" * 80)
+            print(
+                "%08x[%s]/%d: %s %s"
+                % (
+                    insn.address.offset,
+                    insn.address.space,
+                    insn.length,
+                    insn.asm_mnem,
+                    insn.asm_body,
+                )
+            )
+            print("-" * 80)
+            for op in insn.ops:
+                print("%3d: %s" % (op.seq.uniq, str(op)))
+            print("")
 
 
 class RawBinaryPCodeEmu(PCodeEmu):

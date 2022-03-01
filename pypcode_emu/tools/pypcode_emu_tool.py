@@ -10,8 +10,8 @@ def real_main(args):
         emu = ELFPCodeEmu(args.binary, args.entry)
     except ELFError:
         emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
-    i = emu.translate(emu.entry)
-    emu.dump_instr(i)
+    instr = emu.translate(emu.entry)
+    emu.dump(instr)
 
 
 def main() -> int:
