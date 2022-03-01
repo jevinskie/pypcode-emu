@@ -99,8 +99,6 @@ class PCodeEmu:
             for op in insn.ops:
                 print("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
                 print("\t\t%s" % str(op))
-                # print("%3d: %s" % (op.seq.uniq, str(op)))
-                # print('\t%s' % PcodePrettyPrinter.fmt_op(op))
             print("")
 
 
