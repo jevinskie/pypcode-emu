@@ -21,24 +21,24 @@ class PCodeEmu:
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = memoryview(mmap.mmap(-1, 0xFFFF_FFFF))
         self.register = memoryview(mmap.mmap(-1, 0x1000))
-        self.spacename2raw = {}
         self.space_bufs = {
             "ram": self.ram,
             "register": self.register,
         }
         self.ram_space = self.ctx.spaces["ram"]
-        (
-            self.pc_space,
-            self.pc_off,
-            self.pc_getter,
-            self.pc_setter,
-        ) = self.get_varnode_sym_info("pc")
-        self.pc = property(self.pc_getter, self.pc_setter)
-        self.pc = self.entry
         self.inst_cache = {}
         self.bb_cache = {}
+        reg_names = self.ctx.get_register_names()
 
-    def get_varnode_sym_info(self, name: str):
+        class Regs:
+            pass
+
+        self.regs = Regs()
+        for reg_name in reg_names:
+            setattr(self.regs, reg_name, self.get_varnode_sym_prop(reg_name))
+        self.regs.pc = self.entry
+
+    def get_varnode_sym_prop(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
         assert sym is not None
         sz = int(sym["size"])
@@ -62,7 +62,7 @@ class PCodeEmu:
         def setter(val: int) -> None:
             pack_into(space_buf, off, val)
 
-        return space, off, getter, setter
+        return property(getter, setter)
 
     def translate(self, addr: int):
         if addr in self.bb_cache:
