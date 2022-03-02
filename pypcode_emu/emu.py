@@ -120,6 +120,10 @@ class PCodeEmu:
             return unique[(vn.offset, vn.size)]
         elif vn.space is self.const_space:
             return vn.offset
+        elif vn.space is self.register_space:
+            return int.from_bytes(
+                self.register[vn.offset : vn.offset + vn.size], vn.space.endianness
+            )
         else:
             raise NotImplementedError(vn.space.name)
 
@@ -133,6 +137,14 @@ class PCodeEmu:
             return set_unique
         elif vn.space is self.const_space:
             raise ValueError("setting const?")
+        elif vn.space is self.register_space:
+
+            def set_register(v: int):
+                self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
+                    vn.size, vn.space.endianness
+                )
+
+            return set_register
         else:
             raise NotImplementedError(vn.space.name)
 
