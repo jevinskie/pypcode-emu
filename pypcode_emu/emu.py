@@ -44,12 +44,13 @@ class UniqueBuf(dict):
 
 
 class PCodeEmu:
-    def __init__(self, spec: str, entry: int = 0):
+    def __init__(self, spec: str, entry: int = 0, initial_sp: int = 0x8000_0000):
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
         langs = {l.id: l for arch in Arch.enumerate() for l in arch.languages}
         self.ctx = Context(langs[spec])
         self.entry = entry
+        self.initial_sp = initial_sp
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = memoryview(mmap.mmap(-1, 0x1_0000_0000))
         self.register = memoryview(mmap.mmap(-1, 0x1000))
@@ -72,7 +73,7 @@ class PCodeEmu:
         for reg_name in reg_names:
             setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
         self.regs.pc = self.entry
-        self.regs.r1 = 0x8000_0000
+        self.regs.r1 = self.initial_sp
 
     def get_varnode_sym_prop(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
@@ -267,12 +268,19 @@ class PCodeEmu:
         return idx + 1
 
     def run(self):
-        instrs = self.translate(self.regs.pc)
-        idx = 0
-        for instr in instrs:
-            for op in instr.ops:
-                self.emu_pcodeop(op, idx)
-                idx += 1
+        num_instr = 0
+        while True:
+            instrs = self.translate(self.regs.pc)
+            for instr in instrs:
+                idx = 0
+                oplen = len(instr.ops)
+                while idx < oplen:
+                    idx = self.emu_pcodeop(instr.ops[idx], idx)
+                num_instr += 1
+            if self.regs.r1 == self.initial_sp:
+                break
+            if num_instr > 16:
+                break
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
