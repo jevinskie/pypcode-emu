@@ -23,26 +23,6 @@ from pypcode import (
 from pypcode_emu.utils import *
 
 
-def sext8(v):
-    return (v & ((1 << (8 - 1)) - 1)) - (v & (1 << (8 - 1)))
-
-
-def sext16(v):
-    return (v & ((1 << (16 - 1)) - 1)) - (v & (1 << (16 - 1)))
-
-
-def sext32(v):
-    return (v & ((1 << (32 - 1)) - 1)) - (v & (1 << (32 - 1)))
-
-
-def sext64(v):
-    return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
-
-
-def sext(v, nbytes):
-    return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
-
-
 class UniqueBuf(dict):
     def __getitem__(self, key: slice) -> bytes:
         byte_off, byte_off_end, step = key.start, key.stop, key.step
@@ -246,6 +226,7 @@ class PCodeEmu:
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
         elif opc is OpCode.CBRANCH:
+            # op.d()
             pass
         elif opc is OpCode.LOAD:
             op.d(op.a())
