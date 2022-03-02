@@ -23,6 +23,26 @@ from pypcode import (
 from pypcode_emu.utils import *
 
 
+def sext8(v):
+    return (v & ((1 << (8 - 1)) - 1)) - (v & (1 << (8 - 1)))
+
+
+def sext16(v):
+    return (v & ((1 << (16 - 1)) - 1)) - (v & (1 << (16 - 1)))
+
+
+def sext32(v):
+    return (v & ((1 << (32 - 1)) - 1)) - (v & (1 << (32 - 1)))
+
+
+def sext64(v):
+    return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
+
+
+def sext(v, nbytes):
+    return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
+
+
 class UniqueBuf(dict):
     def __getitem__(self, key: slice) -> bytes:
         byte_off, byte_off_end, step = key.start, key.stop, key.step
@@ -47,7 +67,7 @@ class PCodeEmu:
         self.ctx = Context(langs[spec])
         self.entry = entry
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
-        self.ram = memoryview(mmap.mmap(-1, 0xFFFF_FFFF))
+        self.ram = memoryview(mmap.mmap(-1, 0x1_0000_0000))
         self.register = memoryview(mmap.mmap(-1, 0x1000))
         self.space_bufs = {
             "ram": self.ram,
@@ -68,6 +88,7 @@ class PCodeEmu:
         for reg_name in reg_names:
             setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
         self.regs.pc = self.entry
+        self.regs.r1 = 0x8000_0000
 
     def get_varnode_sym_prop(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
@@ -116,9 +137,6 @@ class PCodeEmu:
             assert a.offset not in self.inst_cache
             for op in insn.ops:
                 opc = op.opcode
-                if opc in (OpCode.LOAD, OpCode.STORE):
-                    print(f"output: {op.output}")
-                    print(f"inputs: {op.inputs}")
                 if opc == OpCode.STORE:
                     space = op.inputs[0].get_space_from_const()
                     spacebuf = self.space2buf(space)
@@ -128,12 +146,12 @@ class PCodeEmu:
 
                     def store_setter(v: int):
                         addr = addr_getter()
+                        print(f"*{space.name}[{addr:#010x}] := {v:#010x}")
                         spacebuf[addr : addr + op.aa.size] = v.to_bytes(
                             op.aa.size, space.endianness
                         )
 
                     op.d = store_setter
-                    op.aa = op.inputs[2]
                     op.a = self.getter_for_varnode(op.aa, unique)
                 elif opc == OpCode.LOAD:
                     op.da = op.output
@@ -144,9 +162,11 @@ class PCodeEmu:
 
                     def load_getter():
                         addr = addr_getter()
-                        return int.from_bytes(
+                        res = int.from_bytes(
                             spacebuf[addr : addr + op.aa.size], space.endianness
                         )
+                        print(f"{res:#010x} = *{space.name}[{addr:#010x}]")
+                        return res
 
                     op.a = load_getter
                 else:
@@ -165,11 +185,16 @@ class PCodeEmu:
         return res.instructions
 
     def getter_for_varnode(self, vn: Varnode, unique: UniqueBuf):
-        print(f"g4vn vn: {str(vn)} unique: {unique}")
         if vn.space is self.unique_space:
-            return lambda: int.from_bytes(
-                unique[vn.offset : vn.offset + vn.size], vn.space.endianness
-            )
+
+            def get_unique():
+                res = int.from_bytes(
+                    unique[vn.offset : vn.offset + vn.size], vn.space.endianness
+                )
+                print(f"{res:#010x} = {vn}")
+                return res
+
+            return get_unique
         elif vn.space is self.const_space:
             return lambda: vn.offset
         elif vn.space is self.register_space:
@@ -183,19 +208,27 @@ class PCodeEmu:
 
             return get_register
         elif vn.space is self.ram_space:
-            return lambda: int.from_bytes(
-                self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
-            )
+
+            def get_ram():
+                res = int.from_bytes(
+                    self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
+                )
+                print(f"{res:#010x} = {vn}")
+                return res
+
+            return get_ram
         else:
             raise NotImplementedError(vn.space.name)
 
     def setter_for_varnode(self, vn: Varnode, unique: UniqueBuf):
-        print(f"s4vn vn: {str(vn)} unique: {unique}")
         if vn.space is self.unique_space:
 
             def set_unique(v: int):
+                if v < 0:
+                    v = (1 << (vn.size * 8)) + v
+                print(f"{vn} := {v:#010x}")
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness, signed=True
+                    vn.size, vn.space.endianness
                 )
 
             return set_unique
@@ -204,17 +237,21 @@ class PCodeEmu:
         elif vn.space is self.register_space:
 
             def set_register(v: int):
+                if v < 0:
+                    v = (1 << (vn.size * 8)) + v
                 print(f"{vn.get_register_name()} := {v:#010x}")
                 self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness, signed=True
+                    vn.size, vn.space.endianness
                 )
 
             return set_register
         elif vn.space is self.ram_space:
 
             def set_ram(v: int):
+                if v < 0:
+                    v = (1 << (vn.size * 8)) + v
                 self.ram[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness, signed=True
+                    vn.size, vn.space.endianness
                 )
 
             return set_ram
@@ -225,7 +262,7 @@ class PCodeEmu:
         print(f"emu_pcodeop: op: {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
-            op.d(op.a())
+            op.d(sext(op.a(), op.aa.size))
         elif opc is OpCode.INT_ADD:
             op.d(op.a() + op.b())
         elif opc is OpCode.STORE:
