@@ -20,6 +20,5 @@ except ELFError:
     emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
 instrs = emu.translate(emu.entry)
 for i in instrs:
-    unique = {}
     for op in i.ops:
-        emu.emu_pcodeop(op, unique)
+        emu.emu_pcodeop(op)
