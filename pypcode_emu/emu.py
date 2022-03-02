@@ -242,7 +242,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp, idx: int) -> None:
+    def emu_pcodeop(self, op: PcodeOp, idx: int) -> int:
         print(f"emu_pcodeop: op: {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -254,14 +254,17 @@ class PCodeEmu:
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
         elif opc is OpCode.CBRANCH:
-            # op.d()
-            pass
+            if op.b():
+                return op.a()
+            return idx + 1
         elif opc is OpCode.LOAD:
             op.d(op.a())
         elif opc is OpCode.BRANCHIND:
-            pass
+            self.regs.pc = op.a()
+            return idx + 1
         else:
             raise NotImplementedError(str(op))
+        return idx + 1
 
     def run(self):
         instrs = self.translate(self.regs.pc)
