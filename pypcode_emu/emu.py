@@ -243,7 +243,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp, idx: int) -> tuple[int, bool]:
+    def emu_pcodeop(self, op: PcodeOp) -> tuple[int, bool]:
         print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -265,10 +265,10 @@ class PCodeEmu:
         elif opc is OpCode.BRANCHIND:
             print("taking BRANCHIND!")
             self.regs.pc = op.a()
-            return idx + 1, True
+            return None, True
         else:
             raise NotImplementedError(str(op))
-        return idx + 1, False
+        return None, False
 
     def run(self):
         num_instr = 0
@@ -280,24 +280,27 @@ class PCodeEmu:
                 instr = instrs[idx]
                 self.dump(instr)
                 num_instr += 1
+                if num_instr > 25:
+                    print("bailing out due to max instr count")
+                    break
                 for op in instr.ops:
-                    br_idx, term = self.emu_pcodeop(op, idx)
+                    br_idx, term = self.emu_pcodeop(op)
                     if term:
                         print("got terminator, translating next pc 1")
                         break
-                    if br_idx != idx + 1:
+                    if br_idx is not None:
+                        print("got nonseq br_idx")
                         idx = br_idx
                         break
-                    else:
-                        idx = br_idx
-                if term:
+                if term or br_idx is not None:
                     print("got terminator, translating next pc 2")
-                    next
+                    continue
+                idx += 1
 
-            # self.regs.pc =
-            if self.regs.r1 == self.initial_sp:
-                print("bailing out due to SP exit")
-                break
+                # self.regs.pc =
+                if self.regs.r1 == self.initial_sp:
+                    print("bailing out due to SP exit")
+                    break
             if num_instr > 25:
                 print("bailing out due to max instr count")
                 break
