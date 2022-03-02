@@ -22,6 +22,8 @@ from pypcode import (
 
 from pypcode_emu.utils import *
 
+# from rich import print
+
 
 def sext(v, nbytes):
     return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
@@ -62,7 +64,6 @@ class PCodeEmu:
         self.unique_space = self.ctx.spaces["unique"]
         self.register_space = self.ctx.spaces["register"]
         self.const_space = self.ctx.spaces["const"]
-        self.inst_cache = {}
         self.bb_cache = {}
         reg_names = self.ctx.get_register_names()
 
@@ -109,6 +110,7 @@ class PCodeEmu:
         }[space]
 
     def translate(self, addr: int):
+        print(f"translate {addr:#010x}")
         if addr in self.bb_cache:
             return self.bb_cache[addr]
         res = self.ctx.translate(self.ram[addr:], addr, bb_terminating=True)
@@ -118,8 +120,6 @@ class PCodeEmu:
             a = insn.address
             # FIXME: probably useless
             assert a.space is self.ram_space
-            # FIXME: might be wrong
-            assert a.offset not in self.inst_cache
             for op in insn.ops:
                 opc = op.opcode
                 if opc == OpCode.STORE:
@@ -127,10 +127,10 @@ class PCodeEmu:
                     spacebuf = self.space2buf(space)
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
-                    addr_getter = self.getter_for_varnode(op.da, unique)
+                    store_addr_getter = self.getter_for_varnode(op.da, unique)
 
                     def store_setter(v: int):
-                        addr = addr_getter()
+                        addr = store_addr_getter()
                         print(f"*{space.name}[{addr:#010x}] := {v:#010x}")
                         spacebuf[addr : addr + op.aa.size] = v.to_bytes(
                             op.aa.size, space.endianness
@@ -144,9 +144,10 @@ class PCodeEmu:
                     op.aa = op.inputs[1]
                     space = op.inputs[0].get_space_from_const()
                     spacebuf = self.space2buf(space)
+                    load_addr_getter = self.getter_for_varnode(op.aa, unique)
 
                     def load_getter():
-                        addr = addr_getter()
+                        addr = load_addr_getter()
                         res = int.from_bytes(
                             spacebuf[addr : addr + op.aa.size], space.endianness
                         )
@@ -165,7 +166,6 @@ class PCodeEmu:
                     if ninputs >= 2:
                         op.ba = op.inputs[1]
                         op.b = self.getter_for_varnode(op.ba, unique)
-            self.inst_cache[a.offset] = insn
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
@@ -243,43 +243,61 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp, idx: int) -> int:
-        print(f"emu_pcodeop: op: {str(op)}")
+    def emu_pcodeop(self, op: PcodeOp) -> tuple[int, bool]:
+        print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
         elif opc is OpCode.INT_ADD:
             op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
+        elif opc is OpCode.INT_MULT:
+            op.d(sext(op.a(), op.aa.size) * sext(op.b(), op.ba.size))
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
         elif opc is OpCode.CBRANCH:
             if op.b():
-                return op.a()
-            return idx + 1
+                print("taking CBRANCH!")
+                return op.a(), True
         elif opc is OpCode.LOAD:
             op.d(op.a())
         elif opc is OpCode.BRANCHIND:
+            print("taking BRANCHIND!")
             self.regs.pc = op.a()
-            return idx + 1
+            return None, True
         else:
             raise NotImplementedError(str(op))
-        return idx + 1
+        return None, False
 
     def run(self):
         num_instr = 0
         while True:
             instrs = self.translate(self.regs.pc)
-            for instr in instrs:
-                idx = 0
-                oplen = len(instr.ops)
-                while idx < oplen:
-                    idx = self.emu_pcodeop(instr.ops[idx], idx)
+            idx = 0
+            instnum = len(instrs)
+            while idx < instnum:
+                instr = instrs[idx]
+                self.dump(instr)
                 num_instr += 1
+                for op in instr.ops:
+                    br_idx, term = self.emu_pcodeop(op)
+                    if term:
+                        print("got terminator, translating next pc 1")
+                        break
+                    if br_idx is not None:
+                        idx = br_idx
+                    else:
+                        idx += 1
+                if term:
+                    print("got terminator, translating next pc 2")
+                    break
+            # self.regs.pc =
             if self.regs.r1 == self.initial_sp:
+                print("bailing out due to SP exit")
                 break
-            if num_instr > 16:
+            if num_instr > 25:
+                print("bailing out due to max instr count")
                 break
 
     def memcpy(self, addr: int, buf: bytes) -> None:
