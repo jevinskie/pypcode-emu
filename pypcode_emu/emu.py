@@ -23,22 +23,6 @@ from pypcode import (
 from pypcode_emu.utils import *
 
 
-def sext8(v):
-    return (v & ((1 << (8 - 1)) - 1)) - (v & (1 << (8 - 1)))
-
-
-def sext16(v):
-    return (v & ((1 << (16 - 1)) - 1)) - (v & (1 << (16 - 1)))
-
-
-def sext32(v):
-    return (v & ((1 << (32 - 1)) - 1)) - (v & (1 << (32 - 1)))
-
-
-def sext64(v):
-    return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
-
-
 def sext(v, nbytes):
     return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
 
@@ -264,7 +248,7 @@ class PCodeEmu:
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
         elif opc is OpCode.INT_ADD:
-            op.d(op.a() + op.b())
+            op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
