@@ -173,9 +173,15 @@ class PCodeEmu:
         elif vn.space is self.const_space:
             return lambda: vn.offset
         elif vn.space is self.register_space:
-            return lambda: int.from_bytes(
-                self.register[vn.offset : vn.offset + vn.size], vn.space.endianness
-            )
+
+            def get_register():
+                res = int.from_bytes(
+                    self.register[vn.offset : vn.offset + vn.size], vn.space.endianness
+                )
+                print(f"{res:#010x} = {vn.get_register_name()}")
+                return res
+
+            return get_register
         elif vn.space is self.ram_space:
             return lambda: int.from_bytes(
                 self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
@@ -198,6 +204,7 @@ class PCodeEmu:
         elif vn.space is self.register_space:
 
             def set_register(v: int):
+                print(f"{vn.get_register_name()} := {v:#010x}")
                 self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness, signed=True
                 )
@@ -214,7 +221,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp):
+    def emu_pcodeop(self, op: PcodeOp, idx: int) -> None:
         print(f"emu_pcodeop: op: {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -234,6 +241,14 @@ class PCodeEmu:
             pass
         else:
             raise NotImplementedError(str(op))
+
+    def run(self):
+        instrs = self.translate(self.regs.pc)
+        idx = 0
+        for instr in instrs:
+            for op in instr.ops:
+                self.emu_pcodeop(op, idx)
+                idx += 1
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
