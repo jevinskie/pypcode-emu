@@ -243,7 +243,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp) -> tuple[int, bool]:
+    def emu_pcodeop(self, op: PcodeOp, idx: int) -> tuple[int, bool]:
         print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -265,10 +265,10 @@ class PCodeEmu:
         elif opc is OpCode.BRANCHIND:
             print("taking BRANCHIND!")
             self.regs.pc = op.a()
-            return None, True
+            return idx + 1, True
         else:
             raise NotImplementedError(str(op))
-        return None, False
+        return idx + 1, False
 
     def run(self):
         num_instr = 0
@@ -281,17 +281,19 @@ class PCodeEmu:
                 self.dump(instr)
                 num_instr += 1
                 for op in instr.ops:
-                    br_idx, term = self.emu_pcodeop(op)
+                    br_idx, term = self.emu_pcodeop(op, idx)
                     if term:
                         print("got terminator, translating next pc 1")
                         break
-                    if br_idx is not None:
+                    if br_idx != idx + 1:
                         idx = br_idx
+                        break
                     else:
-                        idx += 1
+                        idx = br_idx
                 if term:
                     print("got terminator, translating next pc 2")
-                    break
+                    next
+
             # self.regs.pc =
             if self.regs.r1 == self.initial_sp:
                 print("bailing out due to SP exit")
