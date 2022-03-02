@@ -7,6 +7,7 @@ from typing import Optional, Sequence, Union
 
 import untangle
 from elftools.elf.elffile import ELFFile
+from icecream import ic
 from lief import ELF
 from pypcode import (
     Address,
@@ -243,7 +244,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp) -> tuple[int, bool]:
+    def emu_pcodeop(self, op: PcodeOp) -> Optional[int]:
         print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -259,49 +260,45 @@ class PCodeEmu:
         elif opc is OpCode.CBRANCH:
             if op.b():
                 print("taking CBRANCH!")
-                return op.a(), True
+                return op.a()
         elif opc is OpCode.LOAD:
             op.d(op.a())
         elif opc is OpCode.BRANCHIND:
             print("taking BRANCHIND!")
             self.regs.pc = op.a()
-            return None, True
         else:
             raise NotImplementedError(str(op))
-        return None, False
+        return None
 
     def run(self):
-        num_instr = 0
+        inst_num = 0
+        inst_limit = 25
         while True:
             instrs = self.translate(self.regs.pc)
-            idx = 0
-            instnum = len(instrs)
-            while idx < instnum:
-                instr = instrs[idx]
-                self.dump(instr)
-                num_instr += 1
-                if num_instr > 25:
-                    print("bailing out due to max instr count")
-                    break
-                for op in instr.ops:
-                    br_idx, term = self.emu_pcodeop(op)
-                    if term:
-                        print("got terminator, translating next pc 1")
-                        break
+            num_instrs = len(instrs)
+            ic(num_instrs)
+            inst_idx = 0
+            while inst_idx < num_instrs and inst_num < inst_limit:
+                ic(inst_idx)
+                inst_num += 1
+                inst = instrs[inst_idx]
+                print(f"inst sz: {instrs[inst_idx].length}")
+                inst_idx += 1
+                self.dump(inst)
+                for op in inst.ops:
+                    br_idx = self.emu_pcodeop(op)
+                    ic(br_idx)
                     if br_idx is not None:
-                        print("got nonseq br_idx")
-                        idx = br_idx
+                        inst_idx = br_idx
+                        self.regs.pc = instrs[inst_idx].address
                         break
-                if term or br_idx is not None:
-                    print("got terminator, translating next pc 2")
-                    continue
-                idx += 1
-
-                # self.regs.pc =
-                if self.regs.r1 == self.initial_sp:
-                    print("bailing out due to SP exit")
-                    break
-            if num_instr > 25:
+                ic(inst_idx)
+                print("inner loop done!!!!!!!")
+            print("outer loop done!!!")
+            if self.regs.r1 == self.initial_sp:
+                print("bailing out due to SP exit")
+                break
+            if inst_num >= inst_limit:
                 print("bailing out due to max instr count")
                 break
 
