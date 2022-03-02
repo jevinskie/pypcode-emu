@@ -8,7 +8,17 @@ from typing import Optional, Sequence, Union
 import untangle
 from elftools.elf.elffile import ELFFile
 from lief import ELF
-from pypcode import Arch, Context, OpCode, PcodeOp, PcodePrettyPrinter, Translation
+from pypcode import (
+    Address,
+    AddrSpace,
+    Arch,
+    Context,
+    OpCode,
+    PcodeOp,
+    PcodePrettyPrinter,
+    Translation,
+    Varnode,
+)
 
 from pypcode_emu.utils import *
 
@@ -29,6 +39,10 @@ def sext64(v):
     return (v & ((1 << (64 - 1)) - 1)) - (v & (1 << (64 - 1)))
 
 
+def sext(v, nbytes):
+    return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
+
+
 class PCodeEmu:
     def __init__(self, spec: str, entry: int = 0):
         arch, endianness, bitness, _ = spec.split(":")
@@ -46,6 +60,7 @@ class PCodeEmu:
         self.ram_space = self.ctx.spaces["ram"]
         self.unique_space = self.ctx.spaces["unique"]
         self.register_space = self.ctx.spaces["register"]
+        self.const_space = self.ctx.spaces["const"]
         self.inst_cache = {}
         self.bb_cache = {}
         reg_names = self.ctx.get_register_names()
@@ -99,20 +114,43 @@ class PCodeEmu:
             self.inst_cache[a.offset] = insn
         return res.instructions
 
-    def emu_pcodeop(self, op: PcodeOp):
+    def value_for_varnode(self, vn: Varnode, unique: dict[tuple[int, int], int]):
+        print(f"v4vn vn: {str(vn)} unique: {unique}")
+        if vn.space is self.unique_space:
+            return unique[(vn.offset, vn.size)]
+        elif vn.space is self.const_space:
+            return vn.offset
+        else:
+            raise NotImplementedError(vn.space.name)
+
+    def setter_for_varnode(self, vn: Varnode, unique: dict[tuple[int, int], int]):
+        print(f"s4vn vn: {str(vn)} unique: {unique}")
+        if vn.space is self.unique_space:
+
+            def set_unique(v: int):
+                unique[(vn.offset, vn.size)] = v
+
+            return set_unique
+        elif vn.space is self.const_space:
+            raise ValueError("setting const?")
+        else:
+            raise NotImplementedError(vn.space.name)
+
+    def emu_pcodeop(self, op: PcodeOp, unique: dict[tuple[int, int], int]):
+        print(f"emu_pcodeop: op: {str(op)}")
         opc = op.opcode
         d = op.output
-        # ds = setter_for_varnode(d)
+        ds = self.setter_for_varnode(d, unique)
         ninputs = len(op.inputs)
         if ninputs >= 1:
             a = op.inputs[0]
-            # av = value_for_varnode(a)
+            av = self.value_for_varnode(a, unique)
         if ninputs >= 2:
             b = op.inputs[1]
-            # bv = value_for_varnode(b)
+            bv = self.value_for_varnode(b, unique)
 
         if opc is OpCode.INT_SEXT:
-            pass
+            ds(sext(av, a.size))
         elif opc is OpCode.INT_ADD:
             pass
         elif opc is OpCode.STORE:
