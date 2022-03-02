@@ -86,7 +86,7 @@ class PCodeEmu:
 
         self.regs = Regs()
         for reg_name in reg_names:
-            setattr(self.regs, reg_name, self.get_varnode_sym_prop(reg_name))
+            setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
         self.regs.pc = self.entry
 
     def get_varnode_sym_prop(self, name: str):
@@ -107,10 +107,10 @@ class PCodeEmu:
         unpack_from = struct.Struct(struct_fmt).unpack_from
         pack_into = struct.Struct(struct_fmt).pack_into
 
-        def getter() -> int:
+        def getter(self) -> int:
             return unpack_from(space_buf, off)[0]
 
-        def setter(val: int) -> None:
+        def setter(self, val: int) -> None:
             pack_into(space_buf, off, val)
 
         return property(getter, setter)
@@ -209,7 +209,7 @@ class PCodeEmu:
 
             def set_unique(v: int):
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness
+                    vn.size, vn.space.endianness, signed=True
                 )
 
             return set_unique
@@ -219,7 +219,7 @@ class PCodeEmu:
 
             def set_register(v: int):
                 self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness
+                    vn.size, vn.space.endianness, signed=True
                 )
 
             return set_register
@@ -227,28 +227,28 @@ class PCodeEmu:
 
             def set_ram(v: int):
                 self.ram[vn.offset : vn.offset + vn.size] = v.to_bytes(
-                    vn.size, vn.space.endianness
+                    vn.size, vn.space.endianness, signed=True
                 )
 
             return set_ram
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp, unique: dict[tuple[int, int], int]):
+    def emu_pcodeop(self, op: PcodeOp):
         print(f"emu_pcodeop: op: {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
-            op.d(sext(op.a(), op.aa.size))
+            op.d(op.a())
         elif opc is OpCode.INT_ADD:
-            pass
+            op.d(op.a() + op.b())
         elif opc is OpCode.STORE:
-            pass
+            op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
-            pass
+            op.d(op.a() == op.b())
         elif opc is OpCode.CBRANCH:
             pass
         elif opc is OpCode.LOAD:
-            pass
+            op.d(op.a())
         elif opc is OpCode.BRANCHIND:
             pass
         else:
