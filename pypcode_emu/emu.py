@@ -276,12 +276,16 @@ class PCodeEmu:
         while True:
             instrs = self.translate(self.regs.pc)
             num_instrs = len(instrs)
-            for inst in instrs:
+            for i, inst in enumerate(instrs):
                 inst_num += 1
                 if inst_num >= inst_limit:
                     print("bailing out due to max instr count")
                     return
                 self.dump(inst)
+                term = i == num_instrs - 1
+                print(
+                    f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
+                )
                 op_idx = 0
                 num_ops = len(inst.ops)
                 while op_idx < num_ops:
@@ -294,6 +298,9 @@ class PCodeEmu:
                     else:
                         op_idx += 1
                     print(f"end op_idx: {op_idx} num_ops: {num_ops}")
+                print(f"adjusting pc by {inst.length + inst.length_delay}")
+                if op.opcode not in (OpCode.BRANCHIND,):
+                    self.regs.pc += inst.length + inst.length_delay
                 print("inner loop done!!!!!!!")
             print("outer loop done!!!")
             if self.regs.r1 == self.initial_sp:
