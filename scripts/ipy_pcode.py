@@ -21,9 +21,9 @@ except ELFError:
 print(f"pc before: {emu.regs.pc:#010x}")
 print(f"r1 before: {emu.regs.r1:#010x}")
 print(f"r3 before: {emu.regs.r3:#010x}")
+emu.regs.r5 = 5
 print(f"r5 before: {emu.regs.r5:#010x}")
 print(f"r15 before: {emu.regs.r15:#010x}")
-
 
 emu.run()
 
