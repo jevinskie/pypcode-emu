@@ -52,49 +52,26 @@ class UniqueBuf(dict):
         super().__setitem__((byte_off, num_bytes), value)
 
 
-class Property:
-    "Emulate PyProperty_Type() in Objects/descrobject.c"
+class Int(int):
+    addr: int
+    size: int
 
-    def __init__(self, fget=None, fset=None, fdel=None, doc=None):
-        self.fget = fget
-        self.fset = fset
-        self.fdel = fdel
-        if doc is None and fget is not None:
-            doc = fget.__doc__
-        self.__doc__ = doc
+    def __new__(cls, value: int, addr: int, size: int):
+        res = int.__new__(cls, value)
+        res.addr = addr
+        res.size = size
+        return res
 
-    def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-        if self.fget is None:
-            raise AttributeError("unreadable attribute")
-        return self.fget(obj)
+    def sext(self, size: Optional[int] = None) -> int:
+        if size is None:
+            size = self.size
+        return sext(self, size)
 
-    def __set__(self, obj, value):
-        if self.fset is None:
-            raise AttributeError("can't set attribute")
-        self.fset(obj, value)
-
-    def __delete__(self, obj):
-        if self.fdel is None:
-            raise AttributeError("can't delete attribute")
-        self.fdel(obj)
-
-    def getter(self, fget):
-        return type(self)(fget, self.fset, self.fdel, self.__doc__)
-
-    def setter(self, fset):
-        return type(self)(self.fget, fset, self.fdel, self.__doc__)
-
-    def deleter(self, fdel):
-        return type(self)(self.fget, self.fset, fdel, self.__doc__)
+    def s2u(self) -> int:
+        return s2u(self, self.size)
 
 
 class PCodeEmu:
-    class SymProp(Property):
-        addr: int
-        size: int
-
     def __init__(
         self,
         spec: str,
@@ -151,16 +128,13 @@ class PCodeEmu:
         unpack_from = struct.Struct(struct_fmt).unpack_from
         pack_into = struct.Struct(struct_fmt).pack_into
 
-        def getter(self) -> int:
-            return unpack_from(space_buf, off)[0]
+        def getter(self) -> Int:
+            return Int(unpack_from(space_buf, off)[0], off, sz)
 
-        def setter(self, val: int) -> None:
+        def setter(self, val: Union[int, Int]) -> None:
             pack_into(space_buf, off, val)
 
-        prop = PCodeEmu.SymProp(getter, setter)
-        prop.addr = off
-        prop.size = sz
-        return prop
+        return property(getter, setter)
 
     def space2buf(self, space: AddrSpace, unique: Optional[UniqueBuf] = None):
         return {
@@ -365,9 +339,7 @@ class PCodeEmu:
                 if not is_term:
                     old_pc = self.regs.pc
                     new_pc = s2u(
-                        sext(old_pc, self.regs.pc.size)
-                        + inst.length
-                        + inst.length_delay
+                        old_pc.sext() + inst.length + inst.length_delay, old_pc.size
                     )
                     print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
                     self.regs.pc = new_pc
