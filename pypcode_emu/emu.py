@@ -272,34 +272,32 @@ class PCodeEmu:
 
     def run(self):
         inst_num = 0
-        inst_limit = 25
+        inst_limit = 32
         while True:
             instrs = self.translate(self.regs.pc)
             num_instrs = len(instrs)
-            ic(num_instrs)
-            inst_idx = 0
-            while inst_idx < num_instrs and inst_num < inst_limit:
-                ic(inst_idx)
+            for inst in instrs:
                 inst_num += 1
-                inst = instrs[inst_idx]
-                print(f"inst sz: {instrs[inst_idx].length}")
-                inst_idx += 1
+                if inst_num >= inst_limit:
+                    print("bailing out due to max instr count")
+                    return
                 self.dump(inst)
-                for op in inst.ops:
+                op_idx = 0
+                num_ops = len(inst.ops)
+                while op_idx < num_ops:
+                    ic(op_idx)
+                    op = inst.ops[op_idx]
                     br_idx = self.emu_pcodeop(op)
                     ic(br_idx)
                     if br_idx is not None:
-                        inst_idx = br_idx
-                        self.regs.pc = instrs[inst_idx].address
-                        break
-                ic(inst_idx)
+                        op_idx += br_idx
+                    else:
+                        op_idx += 1
+                    print(f"end op_idx: {op_idx} num_ops: {num_ops}")
                 print("inner loop done!!!!!!!")
             print("outer loop done!!!")
             if self.regs.r1 == self.initial_sp:
                 print("bailing out due to SP exit")
-                break
-            if inst_num >= inst_limit:
-                print("bailing out due to max instr count")
                 break
 
     def memcpy(self, addr: int, buf: bytes) -> None:
