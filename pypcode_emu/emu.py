@@ -30,6 +30,12 @@ def sext(v, nbytes):
     return (v & ((1 << ((nbytes * 8) - 1)) - 1)) - (v & (1 << ((nbytes * 8) - 1)))
 
 
+def s2u(v, nbytes):
+    if v < 0:
+        return (1 << (nbytes * 8)) + v
+    return v
+
+
 class UniqueBuf(dict):
     def __getitem__(self, key: slice) -> bytes:
         byte_off, byte_off_end, step = key.start, key.stop, key.step
@@ -46,7 +52,49 @@ class UniqueBuf(dict):
         super().__setitem__((byte_off, num_bytes), value)
 
 
+class Property:
+    "Emulate PyProperty_Type() in Objects/descrobject.c"
+
+    def __init__(self, fget=None, fset=None, fdel=None, doc=None):
+        self.fget = fget
+        self.fset = fset
+        self.fdel = fdel
+        if doc is None and fget is not None:
+            doc = fget.__doc__
+        self.__doc__ = doc
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        if self.fget is None:
+            raise AttributeError("unreadable attribute")
+        return self.fget(obj)
+
+    def __set__(self, obj, value):
+        if self.fset is None:
+            raise AttributeError("can't set attribute")
+        self.fset(obj, value)
+
+    def __delete__(self, obj):
+        if self.fdel is None:
+            raise AttributeError("can't delete attribute")
+        self.fdel(obj)
+
+    def getter(self, fget):
+        return type(self)(fget, self.fset, self.fdel, self.__doc__)
+
+    def setter(self, fset):
+        return type(self)(self.fget, fset, self.fdel, self.__doc__)
+
+    def deleter(self, fdel):
+        return type(self)(self.fget, self.fset, fdel, self.__doc__)
+
+
 class PCodeEmu:
+    class SymProp(Property):
+        addr: int
+        size: int
+
     def __init__(
         self,
         spec: str,
@@ -109,7 +157,10 @@ class PCodeEmu:
         def setter(self, val: int) -> None:
             pack_into(space_buf, off, val)
 
-        return property(getter, setter)
+        prop = PCodeEmu.SymProp(getter, setter)
+        prop.addr = off
+        prop.size = sz
+        return prop
 
     def space2buf(self, space: AddrSpace, unique: Optional[UniqueBuf] = None):
         return {
@@ -218,8 +269,7 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def set_unique(v: int):
-                if v < 0:
-                    v = (1 << (vn.size * 8)) + v
+                v = s2u(v, vn.size)
                 print(f"{vn} := {v:#010x}")
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness
@@ -231,8 +281,7 @@ class PCodeEmu:
         elif vn.space is self.register_space:
 
             def set_register(v: int):
-                if v < 0:
-                    v = (1 << (vn.size * 8)) + v
+                v = s2u(v, vn.size)
                 print(f"{vn.get_register_name()} := {v:#010x}")
                 self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness
@@ -242,8 +291,7 @@ class PCodeEmu:
         elif vn.space is self.ram_space:
 
             def set_ram(v: int):
-                if v < 0:
-                    v = (1 << (vn.size * 8)) + v
+                v = s2u(v, vn.size)
                 self.ram[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness
                 )
@@ -252,7 +300,7 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def emu_pcodeop(self, op: PcodeOp) -> Optional[int]:
+    def emu_pcodeop(self, op: PcodeOp) -> tuple[Optional[int], bool]:
         print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
@@ -268,18 +316,20 @@ class PCodeEmu:
         elif opc is OpCode.CBRANCH:
             if op.b():
                 print("taking CBRANCH!")
-                return op.a()
+                return op.a(), False
         elif opc is OpCode.LOAD:
             op.d(op.a())
         elif opc is OpCode.BRANCHIND:
             print("taking BRANCHIND!")
             self.regs.pc = op.a()
+            return None, True
         elif opc is OpCode.RETURN:
             print(f"taking RETURN!")
             self.regs.pc = op.a()
+            return None, True
         else:
             raise NotImplementedError(str(op))
-        return None
+        return None, False
 
     def run(self):
         inst_num = 0
@@ -302,16 +352,25 @@ class PCodeEmu:
                 while op_idx < num_ops:
                     ic(op_idx)
                     op = inst.ops[op_idx]
-                    br_idx = self.emu_pcodeop(op)
+                    br_idx, is_term = self.emu_pcodeop(op)
                     ic(br_idx)
+                    if is_term:
+                        print("bailing out of op emu due to terminator")
+                        break
                     if br_idx is not None:
                         op_idx += br_idx
                     else:
                         op_idx += 1
                     print(f"end op_idx: {op_idx} num_ops: {num_ops}")
-                print(f"adjusting pc by {inst.length + inst.length_delay}")
-                if op.opcode not in (OpCode.BRANCHIND,):
-                    self.regs.pc += inst.length + inst.length_delay
+                if not is_term:
+                    old_pc = self.regs.pc
+                    new_pc = s2u(
+                        sext(old_pc, self.regs.pc.size)
+                        + inst.length
+                        + inst.length_delay
+                    )
+                    print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
+                    self.regs.pc = new_pc
                 if self.regs.pc == self.ret_addr:
                     print("bailing out due to ret_addr exit inner")
                 print("inner loop done!!!!!!!")
@@ -320,7 +379,7 @@ class PCodeEmu:
                 print("bailing out due to SP exit")
                 break
             if self.regs.pc == self.ret_addr:
-                printf("bailing out due to ret_addr exit outer")
+                print("bailing out due to ret_addr exit outer")
             print()
 
     def memcpy(self, addr: int, buf: bytes) -> None:
