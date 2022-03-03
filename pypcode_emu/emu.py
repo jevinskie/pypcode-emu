@@ -287,6 +287,12 @@ class PCodeEmu:
             op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
+        elif opc is OpCode.INT_LEFT:
+            op.d(op.a() << op.b())
+        elif opc is OpCode.INT_OR:
+            op.d(op.a() | op.b())
+        elif opc is OpCode.COPY:
+            op.d(op.a())
         elif opc is OpCode.CBRANCH:
             if op.b():
                 print("taking CBRANCH!")
@@ -307,7 +313,7 @@ class PCodeEmu:
 
     def run(self):
         inst_num = 0
-        inst_limit = 32
+        inst_limit = 64
         while True:
             instrs = self.translate(self.regs.pc)
             num_instrs = len(instrs)
