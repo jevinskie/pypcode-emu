@@ -47,13 +47,20 @@ class UniqueBuf(dict):
 
 
 class PCodeEmu:
-    def __init__(self, spec: str, entry: int = 0, initial_sp: int = 0x8000_0000):
+    def __init__(
+        self,
+        spec: str,
+        entry: int = 0,
+        initial_sp: int = 0x8000_0000,
+        ret_addr: int = 0x7000_0000,
+    ):
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
         langs = {l.id: l for arch in Arch.enumerate() for l in arch.languages}
         self.ctx = Context(langs[spec])
         self.entry = entry
         self.initial_sp = initial_sp
+        self.ret_addr = ret_addr
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = memoryview(mmap.mmap(-1, 0x1_0000_0000))
         self.register = memoryview(mmap.mmap(-1, 0x1000))
@@ -76,6 +83,7 @@ class PCodeEmu:
             setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
         self.regs.pc = self.entry
         self.regs.r1 = self.initial_sp
+        self.regs.r15 = self.ret_addr - 8
 
     def get_varnode_sym_prop(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
@@ -266,6 +274,9 @@ class PCodeEmu:
         elif opc is OpCode.BRANCHIND:
             print("taking BRANCHIND!")
             self.regs.pc = op.a()
+        elif opc is OpCode.RETURN:
+            print(f"taking RETURN!")
+            self.regs.pc = op.a()
         else:
             raise NotImplementedError(str(op))
         return None
@@ -301,11 +312,16 @@ class PCodeEmu:
                 print(f"adjusting pc by {inst.length + inst.length_delay}")
                 if op.opcode not in (OpCode.BRANCHIND,):
                     self.regs.pc += inst.length + inst.length_delay
+                if self.regs.pc == self.ret_addr:
+                    print("bailing out due to ret_addr exit inner")
                 print("inner loop done!!!!!!!")
             print("outer loop done!!!")
             if self.regs.r1 == self.initial_sp:
                 print("bailing out due to SP exit")
                 break
+            if self.regs.pc == self.ret_addr:
+                printf("bailing out due to ret_addr exit outer")
+            print()
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
