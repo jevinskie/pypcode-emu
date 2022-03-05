@@ -36,6 +36,10 @@ def s2u(v, nbytes):
     return v
 
 
+def subpiece(v, nbytes):
+    return v & ((1 << (nbytes * 8)) - 1)
+
+
 class UniqueBuf(dict):
     def __getitem__(self, key: slice) -> bytes:
         byte_off, byte_off_end, step = key.start, key.stop, key.step
@@ -143,17 +147,29 @@ class PCodeEmu:
             self.unique_space: unique,
         }[space]
 
-    def translate(self, addr: int):
+    def translate(
+        self,
+        addr: int,
+        max_inst: int = 0,
+        max_bytes: int = 0,
+        bb_terminating: bool = False,
+    ) -> Sequence[Translation]:
         print(f"translate {addr:#010x}")
         if addr in self.bb_cache:
             return self.bb_cache[addr]
-        res = self.ctx.translate(self.ram[addr:], addr, bb_terminating=True)
+        res = self.ctx.translate(
+            self.ram[addr:],
+            addr,
+            max_inst=max_inst,
+            max_bytes=max_bytes,
+            bb_terminating=bb_terminating,
+        )
         assert res.error is None
-        unique = UniqueBuf()
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
             assert a.space is self.ram_space
+            unique = UniqueBuf()
             for op in insn.ops:
                 opc = op.opcode
                 if opc == OpCode.STORE:
@@ -161,12 +177,13 @@ class PCodeEmu:
                     spacebuf = self.space2buf(space)
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
+                    op.ba = op.inputs[0]
                     store_addr_getter = self.getter_for_varnode(op.da, unique)
 
                     def store_setter(v: int):
-                        addr = store_addr_getter()
-                        print(f"*{space.name}[{addr:#010x}] := {v:#010x}")
-                        spacebuf[addr : addr + op.aa.size] = v.to_bytes(
+                        store_addr = store_addr_getter()
+                        print(f"*{space.name}[{store_addr:#010x}] := {v:#010x}")
+                        spacebuf[store_addr : store_addr + op.aa.size] = v.to_bytes(
                             op.aa.size, space.endianness
                         )
 
@@ -177,15 +194,20 @@ class PCodeEmu:
                     op.d = self.setter_for_varnode(op.da, unique)
                     op.aa = op.inputs[1]
                     space = op.inputs[0].get_space_from_const()
+                    op.ba = op.inputs[0]
                     spacebuf = self.space2buf(space)
+                    if op.aa.offset == 0x7980:
+                        print(f"ok, SPACE1 IS: {space} unique: {unique}")
                     load_addr_getter = self.getter_for_varnode(op.aa, unique)
 
                     def load_getter():
-                        addr = load_addr_getter()
+                        load_addr = load_addr_getter()
+                        print(f"ok, SPACE2 IS: {space} unique: {unique}")
                         res = int.from_bytes(
-                            spacebuf[addr : addr + op.aa.size], space.endianness
+                            spacebuf[load_addr : load_addr + op.aa.size],
+                            space.endianness,
                         )
-                        print(f"{res:#010x} = *{space.name}[{addr:#010x}]")
+                        print(f"{res:#010x} = *{space.name}[{load_addr:#010x}]")
                         return res
 
                     op.a = load_getter
@@ -207,6 +229,8 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def get_unique():
+                if vn.offset == 31104:
+                    print(f"vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}")
                 res = int.from_bytes(
                     unique[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
@@ -279,32 +303,46 @@ class PCodeEmu:
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
+        elif opc is OpCode.INT_ZEXT:
+            op.d(op.a())
         elif opc is OpCode.INT_ADD:
             op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
         elif opc is OpCode.INT_MULT:
             op.d(sext(op.a(), op.aa.size) * sext(op.b(), op.ba.size))
         elif opc is OpCode.STORE:
             op.d(op.a())
+        elif opc is OpCode.LOAD:
+            print(
+                f"LOAD: d: {op.da} a: {op.aa} ba: {op.ba} space: {op.ba.get_space_from_const().name}"
+            )
+            op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
+        elif opc is OpCode.INT_NOTEQUAL:
+            op.d(op.a() != op.b())
         elif opc is OpCode.INT_LEFT:
             op.d(op.a() << op.b())
+        elif opc is OpCode.INT_RIGHT:
+            op.d(op.a() >> op.b())
+        elif opc is OpCode.INT_SRIGHT:
+            op.d(sext(op.a(), op.aa.size) >> op.b())
+        elif opc is OpCode.SUBPIECE:
+            op.d(subpiece(op.a(), op.aa.size))
         elif opc is OpCode.INT_OR:
             op.d(op.a() | op.b())
+        elif opc is OpCode.INT_AND:
+            op.d(op.a() & op.b())
+        elif opc is OpCode.INT_XOR:
+            op.d(op.a() ^ op.b())
         elif opc is OpCode.COPY:
             op.d(op.a())
         elif opc is OpCode.CBRANCH:
             if op.b():
-                print("taking CBRANCH!")
                 return op.a(), False
-        elif opc is OpCode.LOAD:
-            op.d(op.a())
         elif opc is OpCode.BRANCHIND:
-            print("taking BRANCHIND!")
             self.regs.pc = op.a()
             return None, True
         elif opc is OpCode.RETURN:
-            print(f"taking RETURN!")
             self.regs.pc = op.a()
             return None, True
         else:
@@ -313,7 +351,7 @@ class PCodeEmu:
 
     def run(self):
         inst_num = 0
-        inst_limit = 64
+        inst_limit = 64 * 1e6
         while True:
             instrs = self.translate(self.regs.pc)
             num_instrs = len(instrs)
@@ -330,10 +368,10 @@ class PCodeEmu:
                 op_idx = 0
                 num_ops = len(inst.ops)
                 while op_idx < num_ops:
-                    ic(op_idx)
+                    # ic(op_idx)
                     op = inst.ops[op_idx]
                     br_idx, is_term = self.emu_pcodeop(op)
-                    ic(br_idx)
+                    # ic(br_idx)
                     if is_term:
                         print("bailing out of op emu due to terminator")
                         break
