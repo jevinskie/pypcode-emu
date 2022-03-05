@@ -152,7 +152,7 @@ class PCodeEmu:
         addr: int,
         max_inst: int = 0,
         max_bytes: int = 0,
-        bb_terminating: bool = False,
+        bb_terminating: bool = True,
     ) -> Sequence[Translation]:
         print(f"translate {addr:#010x}")
         if addr in self.bb_cache:
@@ -164,7 +164,8 @@ class PCodeEmu:
             max_bytes=max_bytes,
             bb_terminating=bb_terminating,
         )
-        assert res.error is None
+        if res.error is not None:
+            raise RuntimeError(res.error)
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
@@ -229,7 +230,7 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def get_unique():
-                if vn.offset == 31104:
+                if vn.offset in (31104, 0x7C00, 0x7980):
                     print(f"vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}")
                 res = int.from_bytes(
                     unique[vn.offset : vn.offset + vn.size], vn.space.endianness
