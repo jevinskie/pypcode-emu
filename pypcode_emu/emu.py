@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import mmap
 import struct
+import sys
 from typing import Optional, Sequence, Union
 
 import untangle
@@ -46,7 +47,13 @@ class UniqueBuf(dict):
         assert byte_off is not None and byte_off_end is not None
         assert step is None
         num_bytes = byte_off_end - byte_off
-        return super().__getitem__((byte_off, num_bytes))
+        try:
+            return super().__getitem__((byte_off, num_bytes))
+        except KeyError as e:
+            print(f"unique[{byte_off:#06x}:{num_bytes}] lookup error. Contents:")
+            for k, v in self.items():
+                print(f"unique[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
+            sys.exit(-1)
 
     def __setitem__(self, key: slice, value):
         byte_off, byte_off_end, step = key.start, key.stop, key.step
@@ -166,11 +173,11 @@ class PCodeEmu:
         )
         if res.error is not None:
             raise RuntimeError(res.error)
+        unique = UniqueBuf()
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
             assert a.space is self.ram_space
-            unique = UniqueBuf()
             for op in insn.ops:
                 opc = op.opcode
                 if opc == OpCode.STORE:
@@ -230,8 +237,11 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def get_unique():
-                if vn.offset in (31104, 0x7C00, 0x7980):
-                    print(f"vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}")
+                if vn.offset in (0xB300, 0x7C00, 0x7980, 0x7E80, 0x8100):
+                    print(
+                        f"get_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
+                    )
+                    print(f"get_unique unique: {unique}")
                 res = int.from_bytes(
                     unique[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
@@ -268,6 +278,11 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def set_unique(v: int):
+                if vn.offset in (0xB300, 0x7C00, 0x7980, 0x7E80, 0x8100):
+                    print(
+                        f"set_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
+                    )
+                    print(f"set_unique unique: {unique}")
                 v = s2u(v, vn.size)
                 print(f"{vn} := {v:#010x}")
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
@@ -390,7 +405,7 @@ class PCodeEmu:
                     self.regs.pc = new_pc
                 if self.regs.pc == self.ret_addr:
                     print("bailing out due to ret_addr exit inner")
-                print("inner loop done!!!!!!!")
+                print("inner op loop done!!!!!!!")
             print("outer loop done!!!")
             if self.regs.r1 == self.initial_sp:
                 print("bailing out due to SP exit")
