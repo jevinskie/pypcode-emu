@@ -411,9 +411,18 @@ class PCodeEmu:
         elif opc is OpCode.RETURN:
             self.regs.pc = op.a()
             return None, True
+        elif opc is OpCode.CALLOTHER:
+            assert op.a() == 0
+            self.software_interrupt(op.b())
+            return None, False
         else:
             raise NotImplementedError(str(op))
         return None, False
+
+    def software_interrupt(self, int_num: int):
+        print(f"got sw int: {int_num:#06x}", int_num)
+        if int_num == 0x00008 and self.regs.r12 == 0x8000_0000:
+            print(f"got checksum exit: {self.regs.r5:#010x}")
 
     def run(self):
         inst_num = 0
