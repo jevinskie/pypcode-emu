@@ -202,7 +202,8 @@ class PCodeEmu:
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
                     op.ba = op.inputs[0]
-                    store_addr_getter = self.getter_for_varnode(op.da, unique)
+                    # FIXME: need lambda?
+                    store_addr_getter = self.getter_for_varnode(lambda: op.da, unique)
 
                     def make_store_setter(
                         store_addr_getter, store_spacebuf, op, store_space
@@ -221,10 +222,10 @@ class PCodeEmu:
                     op.d = make_store_setter(
                         store_addr_getter, store_spacebuf, op, store_space
                     )
-                    op.a = self.getter_for_varnode(op.aa, unique)
+                    op.a = self.getter_for_varnode(lambda: op.aa, unique)
                 elif opc == OpCode.LOAD:
                     op.da = op.output
-                    op.d = self.setter_for_varnode(op.da, unique)
+                    op.d = self.setter_for_varnode(lambda: op.da, unique)
                     op.aa = op.inputs[1]
                     load_space = op.inputs[0].get_space_from_const()
                     op.ba = op.inputs[0]
@@ -234,9 +235,7 @@ class PCodeEmu:
                             f"ok, SPACE1 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
                         )
                         traceback.print_stack()
-                    load_addr_getter = self.getter_for_varnode(
-                        lambda: op.inputs[1], unique
-                    )
+                    load_addr_getter = self.getter_for_varnode(lambda: op.aa, unique)
 
                     def make_load_getter(
                         load_addr_getter, load_spacebuf, op, load_space
@@ -248,7 +247,7 @@ class PCodeEmu:
                             traceback.print_stack()
                             load_addr = load_addr_getter()
                             res = int.from_bytes(
-                                load_spacebuf[load_addr : load_addr + op.aa.size],
+                                load_spacebuf[load_addr : load_addr + op.da.size],
                                 load_space.endianness,
                             )
                             print(
@@ -319,7 +318,9 @@ class PCodeEmu:
         else:
             raise NotImplementedError(vn.space.name)
 
-    def setter_for_varnode(self, vn: Varnode, unique: UniqueBuf):
+    def setter_for_varnode(self, vn: Union[Varnode, Callable], unique: UniqueBuf):
+        if callable(vn):
+            vn = vn()
         if vn.space is self.unique_space:
 
             def set_unique(v: int):
