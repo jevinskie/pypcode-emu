@@ -195,14 +195,23 @@ class PCodeEmu:
                     op.ba = op.inputs[0]
                     store_addr_getter = self.getter_for_varnode(op.da, unique)
 
-                    def store_setter(v: int):
-                        store_addr = store_addr_getter()
-                        print(f"*{store_space.name}[{store_addr:#010x}] := {v:#010x}")
-                        store_spacebuf[
-                            store_addr : store_addr + op.aa.size
-                        ] = v.to_bytes(op.aa.size, store_space.endianness)
+                    def make_store_setter(
+                        store_addr_getter, store_spacebuf, op, store_space
+                    ):
+                        def store_setter(v: int):
+                            store_addr = store_addr_getter()
+                            print(
+                                f"*{store_space.name}[{store_addr:#010x}] := {v:#010x}"
+                            )
+                            store_spacebuf[
+                                store_addr : store_addr + op.aa.size
+                            ] = v.to_bytes(op.aa.size, store_space.endianness)
 
-                    op.d = store_setter
+                        return store_setter
+
+                    op.d = make_store_setter(
+                        store_addr_getter, store_spacebuf, op, store_space
+                    )
                     op.a = self.getter_for_varnode(op.aa, unique)
                 elif opc == OpCode.LOAD:
                     op.da = op.output
@@ -220,20 +229,29 @@ class PCodeEmu:
                         lambda: op.inputs[1], unique
                     )
 
-                    def load_getter():
-                        print(
-                            f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
-                        )
-                        traceback.print_stack()
-                        load_addr = load_addr_getter()
-                        res = int.from_bytes(
-                            load_spacebuf[load_addr : load_addr + op.aa.size],
-                            load_space.endianness,
-                        )
-                        print(f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]")
-                        return res
+                    def make_load_getter(
+                        load_addr_getter, load_spacebuf, op, load_space
+                    ):
+                        def load_getter():
+                            print(
+                                f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
+                            )
+                            traceback.print_stack()
+                            load_addr = load_addr_getter()
+                            res = int.from_bytes(
+                                load_spacebuf[load_addr : load_addr + op.aa.size],
+                                load_space.endianness,
+                            )
+                            print(
+                                f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]"
+                            )
+                            return res
 
-                    op.a = load_getter
+                        return load_getter
+
+                    op.a = make_load_getter(
+                        load_addr_getter, load_spacebuf, op, load_space
+                    )
                 else:
                     if op.output is not None:
                         op.da = op.output
