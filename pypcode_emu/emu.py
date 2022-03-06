@@ -41,8 +41,8 @@ def s2u(v, nbytes):
     return v
 
 
-def subpiece(v, nbytes):
-    return v & ((1 << (nbytes * 8)) - 1)
+def subpiece(v, nbytes, nbytes_out):
+    return (v >> (nbytes * 8)) & ((1 << (nbytes_out * 8)) - 1)
 
 
 class UniqueBuf(dict):
@@ -361,6 +361,18 @@ class PCodeEmu:
             op.d(sext(op.a(), op.aa.size))
         elif opc is OpCode.INT_ZEXT:
             op.d(op.a())
+        elif opc is OpCode.INT_CARRY:
+            op.d(op.a() + op.b() >= (2 << (op.aa.size * 8)))
+        elif opc is OpCode.INT_SCARRY:
+            s = sext(op.a(), op.aa.size) + sext(op.b(), op.aa.size)
+            op.d(
+                s
+                >= (
+                    1 << (op.aa.size * 8 - 1)
+                    if s > 0
+                    else s < -(1 << (op.aa.size * 8 - 1))
+                )
+            )
         elif opc is OpCode.INT_ADD:
             op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
         elif opc is OpCode.INT_MULT:
@@ -371,7 +383,7 @@ class PCodeEmu:
             print(
                 f"LOAD: d: {op.da} a: {op.aa} ba: {op.ba} space: {op.ba.get_space_from_const().name}"
             )
-            v = op.a()
+            v = op.a() & (1 << ((op.da.size * 8)) - 1)
             op.d(v)
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
@@ -384,7 +396,7 @@ class PCodeEmu:
         elif opc is OpCode.INT_SRIGHT:
             op.d(sext(op.a(), op.aa.size) >> op.b())
         elif opc is OpCode.SUBPIECE:
-            op.d(subpiece(op.a(), op.aa.size))
+            op.d(subpiece(op.a(), op.b(), op.da.size))
         elif opc is OpCode.INT_OR:
             op.d(op.a() | op.b())
         elif opc is OpCode.INT_AND:

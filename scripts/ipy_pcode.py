@@ -4,7 +4,7 @@ import argparse
 
 from elftools.elf.elffile import ELFError
 
-from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
+from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu, s2u, sext
 
 parser = argparse.ArgumentParser()
 parser.add_argument("binary", help="Input binary file (binary/ELF)", metavar="BIN")
