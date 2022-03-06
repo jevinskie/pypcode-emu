@@ -366,12 +366,9 @@ class PCodeEmu:
         elif opc is OpCode.INT_SCARRY:
             s = sext(op.a(), op.aa.size) + sext(op.b(), op.aa.size)
             op.d(
-                s
-                >= (
-                    1 << (op.aa.size * 8 - 1)
-                    if s > 0
-                    else s < -(1 << (op.aa.size * 8 - 1))
-                )
+                s >= (1 << (op.aa.size * 8 - 1))
+                if s > 0
+                else s < -(1 << (op.aa.size * 8 - 1))
             )
         elif opc is OpCode.INT_ADD:
             op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
