@@ -123,9 +123,18 @@ class PCodeEmu:
         self.regs = Regs()
         for reg_name in reg_names:
             setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
+        for real_reg_name, alias_reg_name in (
+            ("r1", "sp"),
+            ("r15", "lr"),
+            ("r5", "arg0"),
+            ("r3", "ret"),
+            ("r12", "int_num"),
+        ):
+            setattr(Regs, alias_reg_name, getattr(Regs, real_reg_name))
         self.regs.pc = self.entry
-        self.regs.r1 = self.initial_sp
-        self.regs.r15 = self.ret_addr - 8
+        self.regs.sp = self.initial_sp
+        self.regs.lr = self.ret_addr - 8
+        self.last_csmith_checksum = None
 
     def get_varnode_sym_prop(self, name: str):
         sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
@@ -362,9 +371,9 @@ class PCodeEmu:
         elif opc is OpCode.INT_ZEXT:
             op.d(op.a())
         elif opc is OpCode.INT_CARRY:
-            op.d(op.a() + op.b() >= (2 << (op.aa.size * 8)))
+            op.d(op.a() + op.b() >= (1 << (op.aa.size * 8)))
         elif opc is OpCode.INT_SCARRY:
-            s = sext(op.a(), op.aa.size) + sext(op.b(), op.aa.size)
+            s = sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size)
             op.d(
                 s >= (1 << (op.aa.size * 8 - 1))
                 if s > 0
@@ -412,8 +421,8 @@ class PCodeEmu:
             self.regs.pc = op.a()
             return None, True
         elif opc is OpCode.CALLOTHER:
-            assert op.a() == 0
-            self.software_interrupt(op.b())
+            assert op.a() == 0 and op.b() == 0x8
+            self.software_interrupt(self.regs.int_num)
             return None, False
         else:
             raise NotImplementedError(str(op))
@@ -421,12 +430,14 @@ class PCodeEmu:
 
     def software_interrupt(self, int_num: int):
         print(f"got sw int: {int_num:#06x}", int_num)
-        if int_num == 0x00008 and self.regs.r12 == 0x8000_0000:
-            print(f"got checksum exit: {self.regs.r5:#010x}")
+        if int_num == 0x8000_0000:
+            print(f"got Csmith checksum exit: {self.regs.arg0:#010x}")
+            self.last_csmith_checksum = self.regs.arg0
 
     def run(self):
         inst_num = 0
         inst_limit = 64 * 1e6
+        self.last_csmith_checksum = None
         while True:
             instrs = self.translate(self.regs.pc)
             num_instrs = len(instrs)
@@ -472,6 +483,8 @@ class PCodeEmu:
             if self.regs.pc == self.ret_addr:
                 print("bailing out due to ret_addr exit outer")
             print()
+        if self.last_csmith_checksum is not None:
+            print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
