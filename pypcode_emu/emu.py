@@ -41,8 +41,9 @@ def s2u(v, nbytes):
     return v
 
 
-def subpiece(v, nbytes, nbytes_out):
-    return (v >> (nbytes * 8)) & ((1 << (nbytes_out * 8)) - 1)
+def subpiece(v, nbytes_trunc, nbytes_in, nbytes_out):
+    # FIXME: iffy
+    return (sext(v, nbytes_in) >> (nbytes_trunc * 8)) & ((1 << (nbytes_out * 8)) - 1)
 
 
 class UniqueBuf(dict):
@@ -403,7 +404,7 @@ class PCodeEmu:
         elif opc is OpCode.INT_SRIGHT:
             op.d(sext(op.a(), op.aa.size) >> op.b())
         elif opc is OpCode.SUBPIECE:
-            op.d(subpiece(op.a(), op.b(), op.da.size))
+            op.d(subpiece(op.a(), op.b(), op.aa.size, op.da.size))
         elif opc is OpCode.INT_OR:
             op.d(op.a() | op.b())
         elif opc is OpCode.INT_AND:
