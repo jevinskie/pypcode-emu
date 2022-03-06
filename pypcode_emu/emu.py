@@ -7,6 +7,7 @@ import sys
 import traceback
 from typing import Callable, Optional, Sequence, Union
 
+import ghidra_bridge
 import untangle
 from elftools.elf.elffile import ELFFile
 from icecream import ic
@@ -490,6 +491,18 @@ class PCodeEmu:
             print()
         if self.last_csmith_checksum is not None:
             print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
+
+    def run_headless(self):
+        import ghidra_bridge
+
+        with ghidra_bridge.GhidraBridge(namespace=globals()):
+            from ghidra_bridge.app.emulator import EmulatorHelper
+            from ghidra_bridge.program.model.symbol import SymbolUtilities
+
+            print(getState().getCurrentAddress().getOffset())
+            ghidra.program.model.data.DataUtilities.isUndefinedData(
+                currentProgram, currentAddress
+            )
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
