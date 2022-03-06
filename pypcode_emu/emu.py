@@ -380,7 +380,7 @@ class PCodeEmu:
             print(
                 f"LOAD: d: {op.da} a: {op.aa} ba: {op.ba} space: {op.ba.get_space_from_const().name}"
             )
-            v = op.a() & (1 << ((op.da.size * 8)) - 1)
+            v = op.a() & ((1 << (op.da.size * 8)) - 1)
             op.d(v)
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
