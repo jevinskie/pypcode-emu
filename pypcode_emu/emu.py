@@ -4,7 +4,8 @@ import collections
 import mmap
 import struct
 import sys
-from typing import Optional, Sequence, Union
+import traceback
+from typing import Callable, Optional, Sequence, Union
 
 import untangle
 from elftools.elf.elffile import ELFFile
@@ -23,6 +24,9 @@ from pypcode import (
 )
 
 from pypcode_emu.utils import *
+
+real_print = print
+print = lambda *args, **kwargs: real_print(*args, file=sys.stderr, **kwargs)
 
 # from rich import print
 
@@ -50,7 +54,9 @@ class UniqueBuf(dict):
         try:
             return super().__getitem__((byte_off, num_bytes))
         except KeyError as e:
-            print(f"unique[{byte_off:#06x}:{num_bytes}] lookup error. Contents:")
+            print(
+                f"unique[{byte_off:#06x}:{num_bytes}] aka {byte_off} lookup error. Contents:"
+            )
             for k, v in self.items():
                 print(f"unique[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
             sys.exit(-1)
@@ -177,12 +183,13 @@ class PCodeEmu:
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
+            print(a.space.name)
             assert a.space is self.ram_space
-            for op in insn.ops:
+            for opc_idx, op in enumerate(insn.ops):
                 opc = op.opcode
                 if opc == OpCode.STORE:
-                    space = op.inputs[0].get_space_from_const()
-                    spacebuf = self.space2buf(space)
+                    store_space = op.inputs[0].get_space_from_const()
+                    store_spacebuf = self.space2buf(store_space)
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
                     op.ba = op.inputs[0]
@@ -190,10 +197,10 @@ class PCodeEmu:
 
                     def store_setter(v: int):
                         store_addr = store_addr_getter()
-                        print(f"*{space.name}[{store_addr:#010x}] := {v:#010x}")
-                        spacebuf[store_addr : store_addr + op.aa.size] = v.to_bytes(
-                            op.aa.size, space.endianness
-                        )
+                        print(f"*{store_space.name}[{store_addr:#010x}] := {v:#010x}")
+                        store_spacebuf[
+                            store_addr : store_addr + op.aa.size
+                        ] = v.to_bytes(op.aa.size, store_space.endianness)
 
                     op.d = store_setter
                     op.a = self.getter_for_varnode(op.aa, unique)
@@ -201,21 +208,29 @@ class PCodeEmu:
                     op.da = op.output
                     op.d = self.setter_for_varnode(op.da, unique)
                     op.aa = op.inputs[1]
-                    space = op.inputs[0].get_space_from_const()
+                    load_space = op.inputs[0].get_space_from_const()
                     op.ba = op.inputs[0]
-                    spacebuf = self.space2buf(space)
-                    if op.aa.offset == 0x7980:
-                        print(f"ok, SPACE1 IS: {space} unique: {unique}")
-                    load_addr_getter = self.getter_for_varnode(op.aa, unique)
+                    load_spacebuf = self.space2buf(load_space)
+                    if op.aa.offset in (0x7E80, 0x8100):
+                        print(
+                            f"ok, SPACE1 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address} unique: {unique}"
+                        )
+                        traceback.print_stack()
+                    load_addr_getter = self.getter_for_varnode(
+                        lambda: op.inputs[1], unique
+                    )
 
                     def load_getter():
-                        load_addr = load_addr_getter()
-                        print(f"ok, SPACE2 IS: {space} unique: {unique}")
-                        res = int.from_bytes(
-                            spacebuf[load_addr : load_addr + op.aa.size],
-                            space.endianness,
+                        print(
+                            f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address} unique: {unique}"
                         )
-                        print(f"{res:#010x} = *{space.name}[{load_addr:#010x}]")
+                        traceback.print_stack()
+                        load_addr = load_addr_getter()
+                        res = int.from_bytes(
+                            load_spacebuf[load_addr : load_addr + op.aa.size],
+                            load_space.endianness,
+                        )
+                        print(f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]")
                         return res
 
                     op.a = load_getter
@@ -233,15 +248,18 @@ class PCodeEmu:
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
-    def getter_for_varnode(self, vn: Varnode, unique: UniqueBuf):
+    def getter_for_varnode(self, vn: Union[Varnode, Callable], unique: UniqueBuf):
+        if callable(vn):
+            vn = vn()
         if vn.space is self.unique_space:
 
             def get_unique():
-                if vn.offset in (0xB300, 0x7C00, 0x7980, 0x7E80, 0x8100):
+                if vn.offset in (0x7E80, 0x8100):
                     print(
                         f"get_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
                     )
                     print(f"get_unique unique: {unique}")
+                    traceback.print_stack()
                 res = int.from_bytes(
                     unique[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
@@ -278,11 +296,15 @@ class PCodeEmu:
         if vn.space is self.unique_space:
 
             def set_unique(v: int):
-                if vn.offset in (0xB300, 0x7C00, 0x7980, 0x7E80, 0x8100):
+                if vn.offset in (
+                    0x7E80,
+                    0x8100,
+                ):
                     print(
                         f"set_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
                     )
                     print(f"set_unique unique: {unique}")
+                    traceback.print_stack()
                 v = s2u(v, vn.size)
                 print(f"{vn} := {v:#010x}")
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
@@ -331,7 +353,8 @@ class PCodeEmu:
             print(
                 f"LOAD: d: {op.da} a: {op.aa} ba: {op.ba} space: {op.ba.get_space_from_const().name}"
             )
-            op.d(op.a())
+            v = op.a()
+            op.d(v)
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
         elif opc is OpCode.INT_NOTEQUAL:
