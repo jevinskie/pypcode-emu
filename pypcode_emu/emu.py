@@ -213,7 +213,7 @@ class PCodeEmu:
                     load_spacebuf = self.space2buf(load_space)
                     if op.aa.offset in (0x7E80, 0x8100):
                         print(
-                            f"ok, SPACE1 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address} unique: {unique}"
+                            f"ok, SPACE1 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
                         )
                         traceback.print_stack()
                     load_addr_getter = self.getter_for_varnode(
@@ -222,7 +222,7 @@ class PCodeEmu:
 
                     def load_getter():
                         print(
-                            f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address} unique: {unique}"
+                            f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
                         )
                         traceback.print_stack()
                         load_addr = load_addr_getter()
