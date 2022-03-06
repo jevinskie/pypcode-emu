@@ -420,6 +420,9 @@ class PCodeEmu:
         elif opc is OpCode.RETURN:
             self.regs.pc = op.a()
             return None, True
+        elif opc is OpCode.CALLIND:
+            self.regs.pc = op.a()
+            return None, True
         elif opc is OpCode.CALLOTHER:
             assert op.a() == 0 and op.b() == 0x8
             self.software_interrupt(self.regs.int_num)
