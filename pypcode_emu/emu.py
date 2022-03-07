@@ -383,9 +383,9 @@ class PCodeEmu:
                 else s < -(1 << (op.aa.size * 8 - 1))
             )
         elif opc is OpCode.INT_ADD:
-            op.d(sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size))
+            op.d((op.a() + op.b()) & ((1 << (op.da.size * 8)) - 1))
         elif opc is OpCode.INT_MULT:
-            op.d(sext(op.a(), op.aa.size) * sext(op.b(), op.ba.size))
+            op.d((op.a() * op.b()) & ((1 << (op.da.size * 8)) - 1))
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.LOAD:
@@ -544,10 +544,11 @@ class PCodeEmu:
             # We won't use this, it's just here to show you how to query
             # valid registers for your target architecture.
             registers = getProgramRegisterList(currentProgram)
+            print("getContextRegister: %s" % str(emuHelper.getContextRegister()))
 
             # Here's a list of all the registers we want printed after each
             # instruction. Modify this as you see fit, based on your architecture.
-            reg_filter = []
+            reg_filter = ["imm_msb"]
 
             # Setup your desired starting state. By default, all registers
             # and memory will be 0. This may or may not be acceptable for
@@ -556,7 +557,7 @@ class PCodeEmu:
             emuHelper.writeRegister("r1", 0x000000002FFF0000)
 
             print("Emulation starting at 0x{}".format(mainFunctionEntry))
-            while monitor.isCancelled() is False:
+            while monitor.isCancelled() == False:
 
                 # Check the current address in the program counter, if it's
                 # zero (our `CONTROLLED_RETURN_OFFSET` value) stop emulation.
