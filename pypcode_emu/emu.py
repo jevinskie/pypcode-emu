@@ -24,6 +24,7 @@ from pypcode import (
     Varnode,
 )
 
+from pypcode_emu.histogram import Histogram
 from pypcode_emu.utils import *
 
 real_print = print
@@ -383,9 +384,9 @@ class PCodeEmu:
                 else s < -(1 << (op.aa.size * 8 - 1))
             )
         elif opc is OpCode.INT_ADD:
-            op.d((op.a() + op.b()) & ((1 << (op.da.size * 8)) - 1))
+            op.d(op.a() + op.b() & ((1 << (op.da.size * 8)) - 1))
         elif opc is OpCode.INT_MULT:
-            op.d((op.a() * op.b()) & ((1 << (op.da.size * 8)) - 1))
+            op.d(op.a() * op.b() & ((1 << (op.da.size * 8)) - 1))
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.LOAD:
@@ -441,6 +442,7 @@ class PCodeEmu:
             self.last_csmith_checksum = self.regs.arg0
 
     def run(self):
+        inst_profile = Histogram()
         inst_num = 0
         inst_limit = 64 * 1e6
         self.last_csmith_checksum = None
@@ -453,6 +455,7 @@ class PCodeEmu:
                     print("bailing out due to max instr count")
                     return
                 self.dump(inst)
+                inst_profile[inst.asm_mnem] += 1
                 term = i == num_instrs - 1
                 print(
                     f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
@@ -491,6 +494,7 @@ class PCodeEmu:
             print()
         if self.last_csmith_checksum is not None:
             print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
+        print(inst_profile.ascii_histogram())
 
     def run_headless(self):
         import ghidra_bridge
