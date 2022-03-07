@@ -525,7 +525,7 @@ class PCodeEmu:
                 pc = currentProgram.getProgramContext()
                 return pc.registers
 
-            CONTROLLED_RETURN_OFFSET = 0
+            CONTROLLED_RETURN_OFFSET = self.ret_addr
 
             # Identify function to be emulated
             mainFunctionEntry = getSymbolAddress("main")
@@ -539,8 +539,7 @@ class PCodeEmu:
             controlledReturnAddr = getAddress(CONTROLLED_RETURN_OFFSET)
 
             # Set initial RIP
-            mainFunctionEntryLong = int("0x{}".format(mainFunctionEntry), 16)
-            emuHelper.writeRegister(emuHelper.getPCRegister(), mainFunctionEntryLong)
+            emuHelper.writeRegister(emuHelper.getPCRegister(), self.entry)
 
             # For x86_64 `registers` contains 872 registers! You probably don't
             # want to print all of these. Just be aware, and print what you need.
@@ -558,9 +557,10 @@ class PCodeEmu:
             # and memory will be 0. This may or may not be acceptable for
             # you. So please be aware.
             emuHelper.writeRegister("r5", 5)
-            emuHelper.writeRegister("r1", 0x000000002FFF0000)
+            emuHelper.writeRegister("r1", self.initial_sp)
+            emuHelper.writeRegister("r15", self.ret_addr - 8)
 
-            print("Emulation starting at 0x{}".format(mainFunctionEntry))
+            print("Emulation starting at 0x{}".format(self.entry))
             while monitor.isCancelled() == False:
 
                 # Check the current address in the program counter, if it's
@@ -569,6 +569,8 @@ class PCodeEmu:
                 executionAddress = emuHelper.getExecutionAddress()
                 if executionAddress == controlledReturnAddr:
                     print("Emulation complete.")
+                    r3 = emuHelper.readRegister("r3")
+                    print(f"r3 after headless emu: {r3:#010x}")
                     return
 
                 # Print current instruction and the registers we care about
@@ -590,11 +592,6 @@ class PCodeEmu:
 
             # Cleanup resources and release hold on currentProgram
             emuHelper.dispose()
-
-            print(getState().getCurrentAddress().getOffset())
-            ghidra.program.model.data.DataUtilities.isUndefinedData(
-                currentProgram, currentAddress
-            )
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf

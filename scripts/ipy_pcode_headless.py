@@ -14,7 +14,7 @@ parser.add_argument("-s", "--spec", help="Specification", metavar="SPEC")
 parser.add_argument(
     "-b", "--base", type=lambda x: int(x, 0), help="Base address", metavar="BASE"
 )
-args = parser.parse_args([str(Path(__file__).parent.parent / "rand2")])
+args = parser.parse_args([str(Path(__file__).parent.parent / "fact")])
 try:
     emu = ELFPCodeEmu(args.binary, args.entry)
 except ELFError:
