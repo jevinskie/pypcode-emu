@@ -179,7 +179,7 @@ class PCodeEmu:
         max_bytes: int = 0,
         bb_terminating: bool = True,
     ) -> Sequence[Translation]:
-        print(f"translate {addr:#010x}")
+        # print(f"translate {addr:#010x}")
         if addr in self.bb_cache:
             return self.bb_cache[addr]
         res = self.ctx.translate(
@@ -195,7 +195,6 @@ class PCodeEmu:
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
-            print(a.space.name)
             assert a.space is self.ram_space
             for opc_idx, op in enumerate(insn.ops):
                 opc = op.opcode
@@ -368,7 +367,7 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def emu_pcodeop(self, op: PcodeOp) -> tuple[Optional[int], bool]:
-        print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
+        # print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
@@ -462,9 +461,9 @@ class PCodeEmu:
                     self.dump(binst)
                     inst_profile[binst.asm_mnem] += 1
                 term = i == num_instrs - 1
-                print(
-                    f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
-                )
+                # print(
+                #     f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
+                # )
                 op_idx = 0
                 num_ops = len(inst.ops)
                 while op_idx < num_ops:
@@ -473,29 +472,30 @@ class PCodeEmu:
                     br_idx, is_term = self.emu_pcodeop(op)
                     # ic(br_idx)
                     if is_term:
-                        print("bailing out of op emu due to terminator")
+                        # print("bailing out of op emu due to terminator")
                         break
                     if br_idx is not None:
                         op_idx += br_idx
                     else:
                         op_idx += 1
-                    print(f"end op_idx: {op_idx} num_ops: {num_ops}")
+                    # print(f"end op_idx: {op_idx} num_ops: {num_ops}")
                 if not is_term:
                     old_pc = self.regs.pc
                     new_pc = s2u(
                         old_pc.sext() + inst.length + inst.length_delay, old_pc.size
                     )
-                    print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
+                    # print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
                     self.regs.pc = new_pc
                 if self.regs.pc == self.ret_addr:
                     print("bailing out due to ret_addr exit inner")
-                print("inner op loop done!!!!!!!")
-            print("outer loop done!!!")
-            if self.regs.r1 == self.initial_sp:
-                print("bailing out due to SP exit")
-                break
+                # print("inner op loop done!!!!!!!")
+            # print("outer loop done!!!")
+            # if self.regs.r1 == self.initial_sp:
+            #     print("bailing out due to SP exit")
+            #     break
             if self.regs.pc == self.ret_addr:
                 print("bailing out due to ret_addr exit outer")
+                break
             print()
         if self.last_csmith_checksum is not None:
             print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
