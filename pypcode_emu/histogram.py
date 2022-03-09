@@ -15,7 +15,6 @@ class Histogram(defaultdict):
 
     def ascii_histogram(self, width=80):
         res = ""
-        total = sum(self.values())
         sorted_self = dict(sorted(self.items(), key=lambda i: i[1], reverse=True))
         max_num = list(sorted_self.values())[0]
         for i, mn in enumerate(sorted_self.items()):

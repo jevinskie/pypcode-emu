@@ -494,6 +494,7 @@ class PCodeEmu:
             print()
         if self.last_csmith_checksum is not None:
             print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
+        print(f"num instrs run: {inst_num}")
         print(inst_profile.ascii_histogram())
 
     def run_headless(self):
@@ -551,7 +552,7 @@ class PCodeEmu:
 
             # Here's a list of all the registers we want printed after each
             # instruction. Modify this as you see fit, based on your architecture.
-            reg_filter = ["imm_msb"]
+            reg_filter = []
 
             # Setup your desired starting state. By default, all registers
             # and memory will be 0. This may or may not be acceptable for
@@ -570,7 +571,7 @@ class PCodeEmu:
                 if executionAddress == controlledReturnAddr:
                     print("Emulation complete.")
                     r3 = emuHelper.readRegister("r3")
-                    print(f"r3 after headless emu: {r3:#010x}")
+                    print("r3 after headless emu: {:#010x}".format(r3))
                     return
 
                 # Print current instruction and the registers we care about
