@@ -11,7 +11,7 @@ int main (int argc, char* argv[])
     if (argc == 2 && strcmp(argv[1], "1") == 0) print_hash_value = 1;
     platform_main_begin();
     crc32_gentab();
-#if 0
+#if 1
     transparent_crc(243, "v243", print_hash_value);
     platform_main_end(crc32_context ^ 0xFFFFFFFFUL, print_hash_value);
 #else

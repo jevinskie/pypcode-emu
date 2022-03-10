@@ -445,62 +445,64 @@ class PCodeEmu:
         inst_num = 0
         inst_limit = 64 * 1e6
         self.last_csmith_checksum = None
-        while True:
-            instrs = self.translate(self.regs.pc)
-            num_instrs = len(instrs)
-            for i, inst in enumerate(instrs):
-                inst_num += 1
-                if inst_num >= inst_limit:
-                    print("bailing out due to max instr count")
-                    return
-                self.dump(inst)
-                inst_profile[inst.asm_mnem] += 1
-                for binst in inst.delayslot_instructions:
+        try:
+            while True:
+                instrs = self.translate(self.regs.pc)
+                num_instrs = len(instrs)
+                for i, inst in enumerate(instrs):
                     inst_num += 1
-                    # don't bother checking bailout condition here, next non-delay instr will trigger
-                    self.dump(binst)
-                    inst_profile[binst.asm_mnem] += 1
-                term = i == num_instrs - 1
-                # print(
-                #     f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
-                # )
-                op_idx = 0
-                num_ops = len(inst.ops)
-                while op_idx < num_ops:
-                    # ic(op_idx)
-                    op = inst.ops[op_idx]
-                    br_idx, is_term = self.emu_pcodeop(op)
-                    # ic(br_idx)
-                    if is_term:
-                        # print("bailing out of op emu due to terminator")
-                        break
-                    if br_idx is not None:
-                        op_idx += br_idx
-                    else:
-                        op_idx += 1
-                    # print(f"end op_idx: {op_idx} num_ops: {num_ops}")
-                if not is_term:
-                    old_pc = self.regs.pc
-                    new_pc = s2u(
-                        old_pc.sext() + inst.length + inst.length_delay, old_pc.size
-                    )
-                    # print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
-                    self.regs.pc = new_pc
+                    if inst_num >= inst_limit:
+                        print("bailing out due to max instr count")
+                        return
+                    self.dump(inst)
+                    inst_profile[inst.asm_mnem] += 1
+                    for binst in inst.delayslot_instructions:
+                        inst_num += 1
+                        # don't bother checking bailout condition here, next non-delay instr will trigger
+                        self.dump(binst)
+                        inst_profile[binst.asm_mnem] += 1
+                    term = i == num_instrs - 1
+                    # print(
+                    #     f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
+                    # )
+                    op_idx = 0
+                    num_ops = len(inst.ops)
+                    while op_idx < num_ops:
+                        # ic(op_idx)
+                        op = inst.ops[op_idx]
+                        br_idx, is_term = self.emu_pcodeop(op)
+                        # ic(br_idx)
+                        if is_term:
+                            # print("bailing out of op emu due to terminator")
+                            break
+                        if br_idx is not None:
+                            op_idx += br_idx
+                        else:
+                            op_idx += 1
+                        # print(f"end op_idx: {op_idx} num_ops: {num_ops}")
+                    if not is_term:
+                        old_pc = self.regs.pc
+                        new_pc = s2u(
+                            old_pc.sext() + inst.length + inst.length_delay, old_pc.size
+                        )
+                        # print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
+                        self.regs.pc = new_pc
+                    if self.regs.pc == self.ret_addr:
+                        print("bailing out due to ret_addr exit inner")
+                    # print("inner op loop done!!!!!!!")
+                # print("outer loop done!!!")
+                # if self.regs.r1 == self.initial_sp:
+                #     print("bailing out due to SP exit")
+                #     break
                 if self.regs.pc == self.ret_addr:
-                    print("bailing out due to ret_addr exit inner")
-                # print("inner op loop done!!!!!!!")
-            # print("outer loop done!!!")
-            # if self.regs.r1 == self.initial_sp:
-            #     print("bailing out due to SP exit")
-            #     break
-            if self.regs.pc == self.ret_addr:
-                print("bailing out due to ret_addr exit outer")
-                break
-            print()
-        if self.last_csmith_checksum is not None:
-            print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
-        print(f"num instrs run: {inst_num}")
-        print(inst_profile.ascii_histogram())
+                    print("bailing out due to ret_addr exit outer")
+                    break
+                print()
+            if self.last_csmith_checksum is not None:
+                print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
+        finally:
+            print(f"num instrs run: {inst_num}")
+            print(inst_profile.ascii_histogram())
 
     def run_headless(self):
         import ghidra_bridge
