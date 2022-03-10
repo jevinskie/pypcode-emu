@@ -5,7 +5,7 @@ from pathlib import Path
 
 from elftools.elf.elffile import ELFError
 
-from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu, s2u, sext
+from pypcode_emu.ghidra import ELFPCodeEmuHeadless, PCodeEmuHeadless
 
 parser = argparse.ArgumentParser()
 parser.add_argument("binary", help="Input binary file (binary/ELF)", metavar="BIN")
@@ -16,9 +16,9 @@ parser.add_argument(
 )
 args = parser.parse_args([str(Path(__file__).parent.parent / "rand3")])
 try:
-    emu = ELFPCodeEmu(args.binary, args.entry)
+    emu = ELFPCodeEmuHeadless(args.binary, args.entry)
 except ELFError:
-    emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
+    emu = PCodeEmuHeadless(args.spec, args.binary, args.base, int(args.entry, 0))
 print(f"pc before: {emu.regs.pc:#010x}")
 print(f"r1 before: {emu.regs.r1:#010x}")
 print(f"r3 before: {emu.regs.r3:#010x}")
