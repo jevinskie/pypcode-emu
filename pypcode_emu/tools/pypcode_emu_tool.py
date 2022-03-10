@@ -1,14 +1,13 @@
 import argparse
 
-from elftools.elf.elffile import ELFError
-
-from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
+from ..elf import BinaryError
+from ..emu import ELFPCodeEmu, PCodeEmu
 
 
 def real_main(args):
     try:
         emu = ELFPCodeEmu(args.binary, args.entry)
-    except ELFError:
+    except BinaryError:
         emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
     instr = emu.translate(
         emu.entry,
@@ -52,7 +51,6 @@ def main() -> int:
         "-b", "--base", type=lambda x: int(x, 0), help="Base address", metavar="BASE"
     )
     args = parser.parse_args()
-    print(args)
     real_main(args)
     return 0
 

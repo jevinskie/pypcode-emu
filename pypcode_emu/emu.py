@@ -4,6 +4,7 @@ import collections
 import mmap
 import struct
 import sys
+import time
 import traceback
 from typing import Callable, Optional, Sequence, Union
 
@@ -25,8 +26,14 @@ from .elf import ELF, ELFCLASS, ELFDATA, EM_MICROBLAZE, PT
 from .histogram import Histogram
 from .utils import *
 
-# real_print = print
+real_print = print
+null_print = lambda *args, **kwargs: None
 # print = lambda *args, **kwargs: real_print(*args, file=sys.stderr, **kwargs)
+
+dprint = null_print
+# dprint = real_print
+iprint = real_print
+eprint = real_print
 
 # from rich import print
 
@@ -55,11 +62,11 @@ class UniqueBuf(dict):
         try:
             return super().__getitem__((byte_off, num_bytes))
         except KeyError as e:
-            print(
+            eprint(
                 f"unique[{byte_off:#06x}:{num_bytes}] aka {byte_off} lookup error. Contents:"
             )
             for k, v in self.items():
-                print(f"unique[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
+                eprint(f"unique[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
             sys.exit(-1)
 
     def __setitem__(self, key: slice, value):
@@ -177,7 +184,7 @@ class PCodeEmu:
         max_bytes: int = 0,
         bb_terminating: bool = True,
     ) -> Sequence[Translation]:
-        # print(f"translate {addr:#010x}")
+        # dprint(f"translate {addr:#010x}")
         if addr in self.bb_cache:
             return self.bb_cache[addr]
         res = self.ctx.translate(
@@ -210,9 +217,9 @@ class PCodeEmu:
                     ):
                         def store_setter(v: int):
                             store_addr = store_addr_getter()
-                            print(
-                                f"*{store_space.name}[{store_addr:#010x}] := {v:#010x}"
-                            )
+                            # dprint(
+                            #     f"*{store_space.name}[{store_addr:#010x}] := {v:#010x}"
+                            # )
                             store_spacebuf[
                                 store_addr : store_addr + op.aa.size
                             ] = v.to_bytes(op.aa.size, store_space.endianness)
@@ -231,7 +238,7 @@ class PCodeEmu:
                     op.ba = op.inputs[0]
                     load_spacebuf = self.space2buf(load_space)
                     # if op.aa.offset in (0x7E80, 0x8100):
-                    #     print(
+                    #     # dprint(
                     #         f"ok, SPACE1 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
                     #     )
                     #     traceback.print_stack()
@@ -241,7 +248,7 @@ class PCodeEmu:
                         load_addr_getter, load_spacebuf, op, load_space
                     ):
                         def load_getter():
-                            # print(
+                            # dprint(
                             #     f"ok, SPACE2 IS: {load_space.name} op.aa.space: {op.aa.space.name} opc_idx: {opc_idx} off: {op.aa.offset:#x} addr: {op.address:#x} unique: {unique}"
                             # )
                             # traceback.print_stack()
@@ -250,9 +257,9 @@ class PCodeEmu:
                                 load_spacebuf[load_addr : load_addr + op.da.size],
                                 load_space.endianness,
                             )
-                            print(
-                                f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]"
-                            )
+                            # dprint(
+                            #     f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]"
+                            # )
                             return res
 
                         return load_getter
@@ -281,15 +288,15 @@ class PCodeEmu:
 
             def get_unique():
                 # if vn.offset in (0x7E80, 0x8100):
-                #     print(
+                #     dprint(
                 #         f"get_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
                 #     )
-                #     print(f"get_unique unique: {unique}")
+                #     # dprint(f"get_unique unique: {unique}")
                 #     traceback.print_stack()
                 res = int.from_bytes(
                     unique[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
-                print(f"{res:#010x} = {vn}")
+                # dprint(f"{res:#010x} = {vn}")
                 return res
 
             return get_unique
@@ -301,7 +308,7 @@ class PCodeEmu:
                 res = int.from_bytes(
                     self.register[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
-                print(f"{res:#010x} = {vn.get_register_name()}")
+                # dprint(f"{res:#010x} = {vn.get_register_name()}")
                 return res
 
             return get_register
@@ -311,7 +318,7 @@ class PCodeEmu:
                 res = int.from_bytes(
                     self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
                 )
-                print(f"{res:#010x} = {vn}")
+                # dprint(f"{res:#010x} = {vn}")
                 return res
 
             return get_ram
@@ -328,13 +335,13 @@ class PCodeEmu:
                 #     0x7E80,
                 #     0x8100,
                 # ):
-                #     print(
+                #     # dprint(
                 #         f"set_unique vn: {vn} vn.offset: {vn.offset} space: {vn.space.name}"
                 #     )
-                #     print(f"set_unique unique: {unique}")
+                #     # dprint(f"set_unique unique: {unique}")
                 #     traceback.print_stack()
                 v = s2u(v, vn.size)
-                print(f"{vn} := {v:#010x}")
+                # dprint(f"{vn} := {v:#010x}")
                 unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness
                 )
@@ -346,7 +353,7 @@ class PCodeEmu:
 
             def set_register(v: int):
                 v = s2u(v, vn.size)
-                print(f"{vn.get_register_name()} := {v:#010x}")
+                # dprint(f"{vn.get_register_name()} := {v:#010x}")
                 self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
                     vn.size, vn.space.endianness
                 )
@@ -365,7 +372,7 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def emu_pcodeop(self, op: PcodeOp) -> tuple[Optional[int], bool]:
-        # print(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
+        # dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
@@ -387,7 +394,7 @@ class PCodeEmu:
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.LOAD:
-            # print(
+            # dprint(
             #     f"LOAD: d: {op.da} a: {op.aa} ba: {op.ba} space: {op.ba.get_space_from_const().name}"
             # )
             v = op.a() & ((1 << (op.da.size * 8)) - 1)
@@ -433,9 +440,9 @@ class PCodeEmu:
         return None, False
 
     def software_interrupt(self, int_num: int):
-        print(f"got sw int: {int_num:#06x}", int_num)
+        iprint(f"got sw int: {int_num:#06x}", int_num)
         if int_num == 0x8000_0000:
-            print(f"got Csmith checksum exit: {self.regs.arg0:#010x}")
+            iprint(f"got Csmith checksum exit: {self.regs.arg0:#010x}")
             self.last_csmith_checksum = self.regs.arg0
 
     def run(self):
@@ -443,6 +450,7 @@ class PCodeEmu:
         inst_num = 0
         inst_limit = 64 * 1e6
         self.last_csmith_checksum = None
+        start_time = time.time()
         try:
             while True:
                 instrs = self.translate(self.regs.pc)
@@ -450,18 +458,17 @@ class PCodeEmu:
                 for i, inst in enumerate(instrs):
                     inst_num += 1
                     if inst_num >= inst_limit:
-                        print("bailing out due to max instr count")
+                        iprint("bailing out due to max instr count")
                         return
-                    self.dump(inst)
+                    # self.dump(inst)
                     inst_profile[inst.asm_mnem] += 1
                     for binst in inst.delayslot_instructions:
                         inst_num += 1
                         # don't bother checking bailout condition here, next non-delay instr will trigger
-                        self.dump(binst)
+                        # self.dump(binst)
                         inst_profile[binst.asm_mnem] += 1
-                    term = i == num_instrs - 1
-                    # print(
-                    #     f"instr len: {inst.length} delay: {inst.length_delay} term: {term}"
+                    # dprint(
+                    #     f"instr len: {inst.length} delay: {inst.length_delay}"
                     # )
                     op_idx = 0
                     num_ops = len(inst.ops)
@@ -471,36 +478,42 @@ class PCodeEmu:
                         br_idx, is_term = self.emu_pcodeop(op)
                         # ic(br_idx)
                         if is_term:
-                            # print("bailing out of op emu due to terminator")
+                            # dprint("bailing out of op emu due to terminator")
                             break
                         if br_idx is not None:
                             op_idx += br_idx
                         else:
                             op_idx += 1
-                        # print(f"end op_idx: {op_idx} num_ops: {num_ops}")
+                        # dprint(f"end op_idx: {op_idx} num_ops: {num_ops}")
                     if not is_term:
                         old_pc = self.regs.pc
                         new_pc = s2u(
                             old_pc.sext() + inst.length + inst.length_delay, old_pc.size
                         )
-                        # print(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
+                        # dprint(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
                         self.regs.pc = new_pc
                     if self.regs.pc == self.ret_addr:
-                        print("bailing out due to ret_addr exit inner")
-                    # print("inner op loop done!!!!!!!")
-                # print("outer loop done!!!")
+                        iprint("bailing out due to ret_addr exit inner")
+                    # dprint("inner op loop done!!!!!!!")
+                # dprint("outer loop done!!!")
                 if self.regs.r1 == self.initial_sp:
-                    print("bailing out due to SP exit")
+                    iprint("bailing out due to SP exit")
                     break
                 if self.regs.pc == self.ret_addr:
-                    print("bailing out due to ret_addr exit outer")
+                    iprint("bailing out due to ret_addr exit outer")
                     break
-                print()
-            if self.last_csmith_checksum is not None:
-                print(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
         finally:
-            print(f"num instrs run: {inst_num}")
-            print(inst_profile.ascii_histogram())
+            end_time = time.time()
+            iprint()
+            if self.last_csmith_checksum is not None:
+                iprint(f"Csmith checksum: {self.last_csmith_checksum:#010x}")
+            duration = end_time - start_time
+            instr_per_sec = inst_num / duration
+            iprint(
+                f"num instrs run: {inst_num:,} time: {duration:.2f} s inst / sec: {int(instr_per_sec):,}"
+            )
+
+            iprint(inst_profile.ascii_histogram())
 
     def memcpy(self, addr: int, buf: bytes) -> None:
         self.ram[addr : addr + len(buf)] = buf
@@ -510,8 +523,8 @@ class PCodeEmu:
         if not isinstance(instr, collections.Sequence):
             instr = (instr,)
         for insn in instr:
-            print("-" * 80)
-            print(
+            dprint("-" * 80)
+            dprint(
                 "%08x/%d: %s %s"
                 % (
                     insn.address.offset,
@@ -520,11 +533,10 @@ class PCodeEmu:
                     insn.asm_body,
                 )
             )
-            print("-" * 80)
+            dprint("-" * 80)
             for op in insn.ops:
-                print("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
-                print("\t\t%s" % str(op))
-            print("")
+                dprint("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
+                dprint("\t\t%s" % str(op))
 
 
 class RawBinaryPCodeEmu(PCodeEmu):
