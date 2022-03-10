@@ -9,8 +9,17 @@ from typing import Callable, Optional, Sequence, Union
 
 import untangle
 from icecream import ic
-from pypcode import (Address, AddrSpace, Arch, Context, OpCode, PcodeOp,
-                     PcodePrettyPrinter, Translation, Varnode)
+from pypcode import (
+    Address,
+    AddrSpace,
+    Arch,
+    Context,
+    OpCode,
+    PcodeOp,
+    PcodePrettyPrinter,
+    Translation,
+    Varnode,
+)
 
 from .elf import *
 from .histogram import Histogram
