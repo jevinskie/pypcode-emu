@@ -1,14 +1,7 @@
-poetry.lock
 **/*.pyc
 .idea/
 
-tests/ps3mfw/ps3updat-cex-3.55.pup
-
-mnt/
-fuse.log
-fuse.xmsgs
-fuseRelaunch.cmd
-
 .python-version
 .vscode/
-tests/ps3mfw/default.spp
+
+pypcode_emu.egg-info/
