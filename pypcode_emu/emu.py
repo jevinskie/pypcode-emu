@@ -21,7 +21,7 @@ from pypcode import (
     Varnode,
 )
 
-from .elf import *
+from .elf import ELF, ELFCLASS, ELFDATA, EM_MICROBLAZE, PT
 from .histogram import Histogram
 from .utils import *
 
@@ -541,13 +541,13 @@ class ELFPCodeEmu(PCodeEmu):
             EM_MICROBLAZE: "mb",
         }[self.elf.header.e_machine]
         endianness = {
-            "ELFDATA2MSB": "BE",
-            "ELFDATA2LSB": "LE",
-        }[self.elf.header.e_ident["EI_DATA"]]
+            ELFDATA.MSB: "BE",
+            ELFDATA.LSB: "LE",
+        }[self.elf.elf_data]
         bitness = {
-            "ELFCLASS32": "32",
-            "ELFCLASS64": "64",
-        }[self.elf.header.e_ident["EI_CLASS"]]
+            ELFCLASS.BITS_32: "32",
+            ELFCLASS.BITS_64: "64",
+        }[self.elf.elf_class]
         if entry is None:
             entry = self.elf.header.e_entry
         elif isinstance(entry, int):
@@ -556,10 +556,10 @@ class ELFPCodeEmu(PCodeEmu):
             try:
                 entry = int(entry, 0)
             except ValueError:
-                entry = first_where_attr_is(self.lelf.symbols, "name", entry).value
+                assert entry in self.elf.symbols
+                entry = self.elf.symbols[entry]
         super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
-        for seg_idx in range(self.elf.num_segments()):
-            seg = self.elf.get_segment(seg_idx)
-            if seg.header.p_type != "PT_LOAD":
+        for seg in self.elf.segments:
+            if seg.type != PT.LOAD:
                 continue
-            self.memcpy(seg.header.p_vaddr, seg.data())
+            self.memcpy(seg.vaddr, seg.bytes)
