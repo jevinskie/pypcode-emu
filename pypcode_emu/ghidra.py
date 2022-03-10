@@ -1,3 +1,5 @@
+import ghidra_bridge
+
 from .emu import ELFPCodeEmu, PCodeEmu
 
 

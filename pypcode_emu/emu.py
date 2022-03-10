@@ -7,28 +7,17 @@ import sys
 import traceback
 from typing import Callable, Optional, Sequence, Union
 
-import ghidra_bridge
 import untangle
-from elftools.elf.elffile import ELFFile
 from icecream import ic
-from lief import ELF
-from pypcode import (
-    Address,
-    AddrSpace,
-    Arch,
-    Context,
-    OpCode,
-    PcodeOp,
-    PcodePrettyPrinter,
-    Translation,
-    Varnode,
-)
+from pypcode import (Address, AddrSpace, Arch, Context, OpCode, PcodeOp,
+                     PcodePrettyPrinter, Translation, Varnode)
 
-from pypcode_emu.histogram import Histogram
-from pypcode_emu.utils import *
+from .elf import *
+from .histogram import Histogram
+from .utils import *
 
-real_print = print
-print = lambda *args, **kwargs: real_print(*args, file=sys.stderr, **kwargs)
+# real_print = print
+# print = lambda *args, **kwargs: real_print(*args, file=sys.stderr, **kwargs)
 
 # from rich import print
 
@@ -538,10 +527,9 @@ class RawBinaryPCodeEmu(PCodeEmu):
 
 class ELFPCodeEmu(PCodeEmu):
     def __init__(self, elf_path: str, entry: Optional[Union[str, int]] = None):
-        self.elf = ELFFile(open(elf_path, "rb"))
-        self.lelf = ELF.parse(elf_path)
+        self.elf = ELF(elf_path)
         machine = {
-            "EM_MICROBLAZE": "mb",
+            EM_MICROBLAZE: "mb",
         }[self.elf.header.e_machine]
         endianness = {
             "ELFDATA2MSB": "BE",
