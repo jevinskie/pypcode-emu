@@ -13,7 +13,7 @@ using s64  = int64_t;
 using uptr = u32;
 using sptr = s32;
 using usz  = uptr;
-using ssz  = iptr;
+using ssz  = sptr;
 
 using bb_t = void (*)(void);
 
@@ -26,14 +26,14 @@ using seg_t = struct {
 };
 
 extern "C" {
-u8 *mem;
+extern u8 *mem;
 
-regs_t regs;
+extern regs_t regs;
 
-const u8 num_segs;
-const seg_t *segs;
+extern const u8 num_segs;
+extern const seg_t *segs;
 
-bb_t *addr2bb;
+extern bb_t *addr2bb;
 
 void untran_panic(uptr pc);
 }

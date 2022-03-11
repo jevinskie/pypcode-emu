@@ -24,6 +24,11 @@ CXX = gen_cmd(os.getenv("CXX", "clang++"))
 LLVM_AS = gen_cmd(os.getenv("CXX", "llvm-as"))
 LLVM_DIS = gen_cmd(os.getenv("CXX", "llvm-dis"))
 
+i8 = ir.IntType(8)
+i16 = ir.IntType(16)
+i32 = ir.IntType(32)
+i64 = ir.IntType(64)
+
 
 class LLVMELFLifter(ELFPCodeEmu):
     exec_start: int
@@ -118,12 +123,23 @@ class LLVMELFLifter(ELFPCodeEmu):
         CXX(*CXXFLAGS, "-c", "-o", lifted_s, "-S", lifted_cpp, "-g0")
         CXX(*CXXFLAGS, "-c", "-o", lifted_ll, "-S", "-emit-llvm", lifted_cpp, "-g0")
 
-        CXX(*LDFLAGS, "-o", self.exe_path, bc_o, harness_o, *LIBS)
+        CXX(*LDFLAGS, "-o", self.exe_path, bc_o, harness_o, lifted_o, *LIBS)
 
     def lift(self):
+        self.gen_segs()
         self.lift_demo()
         self.write_ir()
         self.build()
+
+    def gen_segs(self):
+        num_segs = ir.GlobalVariable(self.m, i8, "num_segs")
+        num_segs.global_constant = True
+        num_segs.initializer = ir.Constant(i8, len(self.segments))
+
+        segs = ir.GlobalVariable(self.m, i8, "segs")
+        segs.global_constant = True
+        segs.initializer = ir.Constant(i8, len(self.segments))
+        # for seg in self.segments:
 
     def lift_demo(self):
 

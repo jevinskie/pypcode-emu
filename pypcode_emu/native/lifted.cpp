@@ -8,10 +8,11 @@
 
 #include "lifted.h"
 
+u8 *mem;
+
 static void load_segs() {
     for (int i = 0; i < num_segs; ++i) {
-        auto &seg = &segs[i];
-        memcpy(mem + seg.addr, seg.data, seg.size);
+        memcpy(mem + segs[i].addr, segs[i].data, segs[i].size);
     }
 }
 

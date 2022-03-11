@@ -18,7 +18,7 @@ from pypcode import (
     Varnode,
 )
 
-from .elf import ELF, ELFCLASS, ELFDATA, EM_MICROBLAZE, PT
+from .elf import ELF, ELFCLASS, ELFDATA, EM_MICROBLAZE, PT, PhdrData
 from .histogram import Histogram
 from .utils import *
 
@@ -513,6 +513,9 @@ class RawBinaryPCodeEmu(PCodeEmu):
 
 
 class ELFPCodeEmu(PCodeEmu):
+    elf: ELF
+    segments: [PhdrData]
+
     def __init__(self, elf_path: str, entry: Optional[Union[str, int]] = None):
         self.elf = ELF(elf_path)
         machine = {
@@ -537,7 +540,9 @@ class ELFPCodeEmu(PCodeEmu):
                 assert entry in self.elf.symbols
                 entry = self.elf.symbols[entry]
         super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
+        self.segments = []
         for seg in self.elf.segments:
             if seg.type != PT.LOAD:
                 continue
+            self.segments.append(seg)
             self.memcpy(seg.vaddr, seg.bytes)

@@ -12,8 +12,6 @@
 
 extern "C" double fpadd(double a, double b);
 
-u8 *mem;
-
 void setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4'0000'0000) {
     mem = (u8 *)mmap(preferred_addr, size, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE | (preferred_addr ? MAP_FIXED : 0), -1, 0);
@@ -21,6 +19,9 @@ void setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4'0
 }
 
 int main(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+
     setup_mem();
     lifted_init();
     lifted_run();
