@@ -1,3 +1,5 @@
+pypcode_emu/native/lifted-regs.h
+
 **/*.s
 **/*.bc
 **/*.o

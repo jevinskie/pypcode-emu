@@ -69,11 +69,20 @@ class LLVMELFLifter(ELFPCodeEmu):
         return m
 
     def _generate_lifted_regs_h(self):
-        reg_names = self.ctx.get_register_names()
-        print(reg_names)
-        for rname in reg_names:
-            reg = self.ctx.get_register(rname)
-            print(reg)
+        lifted_regs_h = (
+            importlib.resources.files(__package__) / "native" / "lifted-regs.h"
+        )
+        with open(lifted_regs_h, "w") as f:
+            p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
+            p("#pragma once")
+            p()
+            p("typedef struct {")
+            reg_names = self.ctx.get_register_names()
+            for rname in reg_names:
+                reg = self.ctx.get_register(rname)
+                p(f"    u{reg.size * 8} {rname};")
+            p("} regs_t;")
+            p()
 
     def write_ir(self):
         open(self.bc_path, "w").write(str(self.m))
