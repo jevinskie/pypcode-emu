@@ -22,8 +22,9 @@ using bb_t = void (*)(void);
 using seg_t = struct {
     uptr addr;
     usz size;
+    u8 ro;
     const u8 *data;
-};
+} __attribute__((packed));
 
 extern "C" {
 extern u8 *mem;
@@ -31,7 +32,7 @@ extern u8 *mem;
 extern regs_t regs;
 
 extern const u8 num_segs;
-extern const seg_t *segs;
+extern const seg_t segs[];
 
 extern bb_t *addr2bb;
 

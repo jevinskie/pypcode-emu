@@ -178,6 +178,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             ptr_t = {
                 32: ".long",
                 64: ".quad",
+            }[self.bitness]
+            host_ptr_t = {
+                32: ".long",
+                64: ".quad",
             }[self.host_bitness]
 
             p(f"\t.type\tnum_segs,@object")
@@ -204,9 +208,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             p(f"segs:")
             for seg in self.segments:
                 seg_name = f"seg_{seg.vaddr:#010x}"
-                p(f"\t.long\t{seg.vaddr:#010x}")
-                p(f"\t.long\t{len(seg.bytes):#010x}")
-                p(f"\t{ptr_t}\t{seg_name}")
+                p(f"\t{ptr_t}\t{seg.vaddr:#010x}")
+                p(f"\t{ptr_t}\t{len(seg.bytes):#010x}")
+                p(f"\t.byte\t{0 if (seg.header.p_flags & PF.WRITE) else 1}")
+                p(f"\t{host_ptr_t}\t{seg_name}")
             p(f"\t.size\tsegs, {num_segs * (2 * 4 + 1 * self.host_bitness // 8)}")
             p()
 
