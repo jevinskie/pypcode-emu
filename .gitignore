@@ -1,5 +1,15 @@
+**/*.s
+**/*.bc
+**/*.o
+**/*.ll
+**/*.bin
+**/*.log
+**/*.i
+**/*.ii
+
 **/*.pyc
 .idea/
+.gdb_history
 
 .python-version
 .vscode/

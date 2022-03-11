@@ -65,12 +65,25 @@ class LLVMELFLifter(ELFPCodeEmu):
         open(self.bc_path, "w").write(str(self.m))
 
     def build(self):
-        harness_cpp = importlib.resources.files(__package__) / "native/harness.cpp"
-        # harness_o = self.
+        harness_cpp = importlib.resources.files(__package__) / "native" / "harness.cpp"
+        fmt_inc_dir = (
+            importlib.resources.files(__package__) / "native" / "fmt" / "include"
+        )
+        harness_o = harness_cpp.name + ".o"
+        bc_o = self.bc_path.name + ".o"
+        bc_s = self.bc_path.name + ".s"
+        CXXFLAGS = ["-I", fmt_inc_dir, "-g", "-std=c++20", "-Wall", "-Wextra"]
+        LDFLAGS = []
+        LIBS = ["-lfmt"]
+        CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
+        CXX(*CXXFLAGS, "-c", "-o", bc_o, self.bc_path)
+        CXX(*CXXFLAGS, "-c", "-o", bc_s, "-S", self.bc_path)
+        CXX(*LDFLAGS, "-o", self.exe_path, bc_o, harness_o, *LIBS)
 
     def lift(self):
         self.lift_demo()
         self.write_ir()
+        self.build()
 
     def lift_demo(self):
 

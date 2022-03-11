@@ -1,3 +1,0 @@
-[submodule "native/fmt"]
-	path = pypcode_emu/native/fmt
-	url = https://github.com/fmtlib/fmt

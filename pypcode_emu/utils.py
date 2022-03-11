@@ -26,7 +26,11 @@ def run_cmd(*args, log: bool = False):
     args = (*args,)
     if log:
         print(f"run_cmd args: {args}", file=sys.stderr)
-    r = subprocess.run(args, capture_output=True, check=True)
+    r = subprocess.run(list(map(str, args)), capture_output=True)
+    if r.returncode != 0:
+        sys.stderr.buffer.write(r.stdout)
+        sys.stderr.buffer.write(r.stderr)
+        raise subprocess.CalledProcessError(r.returncode, args, r.stdout, r.stderr)
     try:
         r.out = r.stdout.decode()
     except UnicodeDecodeError:
