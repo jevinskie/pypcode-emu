@@ -19,6 +19,8 @@ iprint = real_print
 eprint = real_print
 
 CXX = gen_cmd(os.getenv("CXX", "clang++"))
+LLVM_AS = gen_cmd(os.getenv("CXX", "llvm-as"))
+LLVM_DIS = gen_cmd(os.getenv("CXX", "llvm-dis"))
 
 
 class LLVMELFLifter(ELFPCodeEmu):
@@ -72,12 +74,29 @@ class LLVMELFLifter(ELFPCodeEmu):
         harness_o = harness_cpp.name + ".o"
         bc_o = self.bc_path.name + ".o"
         bc_s = self.bc_path.name + ".s"
-        CXXFLAGS = ["-I", fmt_inc_dir, "-g", "-std=c++20", "-Wall", "-Wextra"]
+        bc_bc = self.bc_path.name + ".bc"
+        lifted_cpp = importlib.resources.files(__package__) / "native" / "lifted.cpp"
+        lifted_o = lifted_cpp.name + ".o"
+        lifted_ll = lifted_cpp.name + ".ll"
+
+        lifted_s = lifted_cpp.name + ".s"
+        CXXFLAGS = ["-I", fmt_inc_dir, "-g", "-std=c++20", "-Wall", "-Wextra", "-Oz"]
         LDFLAGS = []
         LIBS = ["-lfmt"]
+
         CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
+
+        LLVM_AS("-o", bc_bc, self.bc_path)
+        LLVM_DIS("-o", self.bc_path, bc_bc)
+        os.remove(bc_bc)
+
         CXX(*CXXFLAGS, "-c", "-o", bc_o, self.bc_path)
-        CXX(*CXXFLAGS, "-c", "-o", bc_s, "-S", self.bc_path)
+        CXX(*CXXFLAGS, "-c", "-o", bc_s, "-S", self.bc_path, "-g0")
+
+        CXX(*CXXFLAGS, "-c", "-o", lifted_o, lifted_cpp)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_s, "-S", lifted_cpp, "-g0")
+        CXX(*CXXFLAGS, "-c", "-o", lifted_ll, "-S", "-emit-llvm", lifted_cpp, "-g0")
+
         CXX(*LDFLAGS, "-o", self.exe_path, bc_o, harness_o, *LIBS)
 
     def lift(self):
@@ -98,6 +117,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         block = func.append_basic_block(name="entry")
         builder = ir.IRBuilder(block)
         a, b = func.args
+        a.name = "a"
+        b.name = "b"
         result = builder.fadd(a, b, name="res")
         builder.ret(result)
 

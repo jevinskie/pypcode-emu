@@ -9,70 +9,64 @@
 
 #include "csmith.h"
 
-
 static long __undefined;
 
 /* --- Struct/Union Declarations --- */
 /* --- GLOBAL VARIABLES --- */
-static int32_t g_3 = 0xF80C3414L;
-static uint8_t g_10[10][3] = {{6UL,0x2FL,255UL},{0UL,0x2FL,0UL},{0x81L,6UL,255UL},{0x81L,0x81L,6UL},{0UL,6UL,6UL},{6UL,0x2FL,255UL},{0UL,0x2FL,0UL},{0x81L,6UL,255UL},{0x81L,0x81L,6UL},{0UL,6UL,6UL}};
-static int32_t g_13 = 0L;
-static volatile uint16_t g_14[9] = {0x058BL,0x058BL,0x058BL,0x058BL,0x058BL,0x058BL,0x058BL,0x058BL,0x058BL};
-
+static int32_t g_3               = 0xF80C3414L;
+static uint8_t g_10[10][3]       = {{6UL, 0x2FL, 255UL}, {0UL, 0x2FL, 0UL},   {0x81L, 6UL, 255UL},
+                              {0x81L, 0x81L, 6UL}, {0UL, 6UL, 6UL},     {6UL, 0x2FL, 255UL},
+                              {0UL, 0x2FL, 0UL},   {0x81L, 6UL, 255UL}, {0x81L, 0x81L, 6UL},
+                              {0UL, 6UL, 6UL}};
+static int32_t g_13              = 0L;
+static volatile uint16_t g_14[9] = {0x058BL, 0x058BL, 0x058BL, 0x058BL, 0x058BL,
+                                    0x058BL, 0x058BL, 0x058BL, 0x058BL};
 
 /* --- FORWARD DECLARATIONS --- */
-static const int8_t  func_1(void);
-
+static const int8_t func_1(void);
 
 /* --- FUNCTIONS --- */
 /* ------------------------------------------ */
-/* 
+/*
  * reads : g_10 g_14 g_3
  * writes: g_10 g_14
  */
-static const int8_t  func_1(void)
-{ /* block id: 0 */
-    int32_t *l_2 = &g_3;
-    int32_t *l_4 = &g_3;
-    int32_t *l_5 = (void*)0;
-    int32_t *l_6 = &g_3;
-    int32_t *l_7 = (void*)0;
-    int32_t *l_8 = &g_3;
-    int32_t *l_9[10] = {&g_3,(void*)0,&g_3,&g_3,(void*)0,&g_3,&g_3,&g_3,&g_3,&g_3};
+static const int8_t func_1(void) { /* block id: 0 */
+    int32_t *l_2     = &g_3;
+    int32_t *l_4     = &g_3;
+    int32_t *l_5     = (void *)0;
+    int32_t *l_6     = &g_3;
+    int32_t *l_7     = (void *)0;
+    int32_t *l_8     = &g_3;
+    int32_t *l_9[10] = {&g_3, (void *)0, &g_3, &g_3, (void *)0, &g_3, &g_3, &g_3, &g_3, &g_3};
     int i;
     g_10[8][2]++;
     --g_14[3];
     return (*l_6);
 }
 
-
-
-
 /* ---------------------------------------- */
-int main (int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     int i, j;
     int print_hash_value = 0;
-    if (argc == 2 && strcmp(argv[1], "1") == 0) print_hash_value = 1;
+    if (argc == 2 && strcmp(argv[1], "1") == 0)
+        print_hash_value = 1;
     platform_main_begin();
     crc32_gentab();
     func_1();
     transparent_crc(g_3, "g_3", print_hash_value);
-    for (i = 0; i < 10; i++)
-    {
-        for (j = 0; j < 3; j++)
-        {
+    for (i = 0; i < 10; i++) {
+        for (j = 0; j < 3; j++) {
             transparent_crc(g_10[i][j], "g_10[i][j]", print_hash_value);
-            if (print_hash_value) printf("index = [%d][%d]\n", i, j);
-
+            if (print_hash_value)
+                printf("index = [%d][%d]\n", i, j);
         }
     }
     transparent_crc(g_13, "g_13", print_hash_value);
-    for (i = 0; i < 9; i++)
-    {
+    for (i = 0; i < 9; i++) {
         transparent_crc(g_14[i], "g_14[i]", print_hash_value);
-        if (print_hash_value) printf("index = [%d]\n", i);
-
+        if (print_hash_value)
+            printf("index = [%d]\n", i);
     }
     platform_main_end(crc32_context ^ 0xFFFFFFFFUL, print_hash_value);
     return 0;
@@ -144,7 +138,7 @@ breakdown:
 
 XXX percentage a fresh-made variable is used: 33.3
 XXX percentage an existing variable is used: 66.7
-FYI: the random generator makes assumptions about the integer size. See platform.info for more details.
+FYI: the random generator makes assumptions about the integer size. See platform.info for more
+details.
 XXX total OOB instances added: 0
 ********************* end of statistics **********************/
-
