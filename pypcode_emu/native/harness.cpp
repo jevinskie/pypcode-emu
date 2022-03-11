@@ -22,9 +22,13 @@ void setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4'0
 
 int main(int argc, const char **argv) {
     setup_mem();
+    lifted_init();
+    lifted_run();
+
     double a = 243.0;
     double b = 42.0;
     double c = fpadd(a, b);
     fmt::print("fpadd({:f}, {:f}) = {:f}\n", a, b, c);
+
     return 0;
 }
