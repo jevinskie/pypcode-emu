@@ -3,7 +3,6 @@ from __future__ import annotations
 import collections
 import mmap
 import struct
-import sys
 import time
 from typing import Optional, Sequence, Union
 

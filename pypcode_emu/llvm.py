@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.resources
 import os
 import platform
@@ -24,6 +26,8 @@ LLVM_DIS = gen_cmd(os.getenv("CXX", "llvm-dis"))
 
 
 class LLVMELFLifter(ELFPCodeEmu):
+    exec_start: int
+    exec_end: int
     bc_path: Path
     exe_path = Path
     m: ir.Module
@@ -53,6 +57,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         iprint(f"exec start: {self.exec_start:#010x} end: {self.exec_end:#010x}")
         self.m = self._get_init_mod()
         self.addr2bb = {}
+        self._generate_lifted_regs_h()
 
     def _get_init_mod(self):
         m = ir.Module(name=Path(self.bc_path).name)
@@ -62,6 +67,13 @@ class LLVMELFLifter(ELFPCodeEmu):
         if triple:
             m.triple = triple
         return m
+
+    def _generate_lifted_regs_h(self):
+        reg_names = self.ctx.get_register_names()
+        print(reg_names)
+        for rname in reg_names:
+            reg = self.ctx.get_register(rname)
+            print(reg)
 
     def write_ir(self):
         open(self.bc_path, "w").write(str(self.m))
