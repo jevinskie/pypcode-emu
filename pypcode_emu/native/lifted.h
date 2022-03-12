@@ -17,6 +17,8 @@ using ssz  = sptr;
 
 using bb_t = void (*)(void);
 
+constexpr int bytes_per_instr = 4;
+
 #include "lifted-regs.h"
 
 using seg_t = struct {
@@ -34,11 +36,12 @@ extern regs_t regs;
 extern const u8 num_segs;
 extern const seg_t segs[];
 
-extern uptr text_start;
-extern uptr text_end;
-extern bb_t *addr2bb;
+extern const uptr entry_point;
+extern const uptr text_start;
+extern const uptr text_end;
+extern const bb_t addr2bb[];
 
-void untran_panic(uptr pc);
+void untrans_panic(uptr pc);
 }
 
 void lifted_init();

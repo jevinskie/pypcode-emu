@@ -5,7 +5,6 @@ import os
 import platform
 from typing import Optional, Union
 
-import pretty_errors
 from llvmlite import ir
 from path import Path
 
@@ -29,7 +28,7 @@ i8 = ir.IntType(8)
 i16 = ir.IntType(16)
 i32 = ir.IntType(32)
 i64 = ir.IntType(64)
-void = ir.VoidType
+void = ir.VoidType()
 
 
 class LLVMELFLifter(ELFPCodeEmu):
@@ -39,7 +38,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     m: ir.Module
     addr2bb: list[ir.Function]
     bb_t: ir.FunctionType
-    trans_panic: ir.GlobalVariable
+    untrans_panic: ir.Function
 
     def __init__(
         self,
@@ -72,12 +71,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.isz = i64
 
         self.bb_t = ir.FunctionType(void, [])
-        self.trans_panic = self.gen_trans_panic_decl()
+        self.untrans_panic = self.gen_utrans_panic_decl()
 
-        self.addr2bb = []
-        for addr in range(self.exec_start, self.exec_end, 4):
-            self.addr2bb.append(self.gen_trans_panic_func(addr))
-
+        self.addr2bb = [None for _ in range(self.exec_start, self.exec_end, 4)]
         self.gen_text_addrs()
 
     def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
@@ -95,26 +91,34 @@ class LLVMELFLifter(ELFPCodeEmu):
             m.triple = triple
         return m
 
-    def gen_trans_panic_decl(self):
-        trans_panic_t = ir.FunctionType(void, [self.iptr])
-        return ir.GlobalVariable(self.m, trans_panic_t, "trans_panic")
+    def gen_utrans_panic_decl(self):
+        untrans_panic_t = ir.FunctionType(void, [self.iptr])
+        untrans_panic_t.args[0].name = "addr"
+        return ir.Function(self.m, untrans_panic_t, "untrans_panic")
 
-    def gen_trans_panic_func(self, addr: int) -> ir.Function:
-        f = ir.Function(self.m, self.bb_t, f"bb_0x{addr:#010x}")
+    def gen_untrans_panic_func(self, addr: int) -> ir.Function:
+        f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
-        addr_c = ir.Constant(self.iptr, addr)
         builder = ir.IRBuilder(bb)
-        builder.call(self.trans_panic, [addr_c])
+        builder.call(self.untrans_panic, [ir.Constant(self.iptr, addr)])
+        builder.ret_void()
         return f
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
         self.global_const("text_end", self.iptr, self.exec_end)
+        self.global_const("entry_point", self.iptr, self.entry)
 
     def gen_addr2bb(self):
+        for addr in range(self.exec_start, self.exec_end, 4):
+            idx = (addr - self.exec_start) // 4
+            if self.addr2bb[idx] is None:
+                self.addr2bb[idx] = self.gen_untrans_panic_func(addr)
+
         addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
         addr2bb = ir.GlobalVariable(self.m, addr2bb_t, "addr2bb")
         addr2bb.global_constant = True
+        addr2bb.initializer = ir.Constant(addr2bb_t, self.addr2bb)
 
     def lift(self):
         self.lift_demo()
@@ -137,9 +141,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         b.name = "b"
         result = builder.fadd(a, b, name="res")
         builder.ret(result)
-
-        # Print the module IR
-        print(self.m)
 
     def gen_lifted_regs_h(self, lifted_regs_h):
         with open(lifted_regs_h, "w") as f:
@@ -209,7 +210,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             "-std=c++20",
             "-Wall",
             "-Wextra",
-            "-Oz",
+            "-O0",
         ]
         LDFLAGS = []
         LIBS = ["-lfmt"]
