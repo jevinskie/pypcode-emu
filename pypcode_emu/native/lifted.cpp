@@ -26,9 +26,7 @@ void lifted_init() {
 
 void lifted_run() {
     fmt::print("lifted_run begin\n");
-    auto idx = addr2bb_idx(entry_point);
-    auto ep  = addr2bb[idx];
-    ep();
+    addr2bb[addr2bb_idx(entry_point)]();
     fmt::print("lifted_run end\n");
 }
 

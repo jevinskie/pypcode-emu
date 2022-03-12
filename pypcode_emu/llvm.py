@@ -36,20 +36,24 @@ class LLVMELFLifter(ELFPCodeEmu):
     exec_end: int
     exe_path = Path
     m: ir.Module
-    addr2bb: list[ir.Function]
+    addr2bb: list[Optional[ir.Function]]
     bb_t: ir.FunctionType
     untrans_panic: ir.Function
+    instr_len: int
 
     def __init__(
         self,
         elf_path: str,
         exe_path: str,
         entry: Optional[Union[str, int]] = None,
+        instr_len: int = 4,
     ):
         super().__init__(elf_path, entry=entry)
         self.exe_path = Path(exe_path)
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
+        self.instr_len = instr_len
+        assert self.instr_len == 4
         num_exec_segs = 0
         for seg in self.elf.segments:
             if seg.type != PT.LOAD or seg.header.p_flags & PF.EXEC == 0:
@@ -73,8 +77,17 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bb_t = ir.FunctionType(void, [])
         self.untrans_panic = self.gen_utrans_panic_decl()
 
-        self.addr2bb = [None for _ in range(self.exec_start, self.exec_end, 4)]
+        self.addr2bb = [None for _ in self.text_addrs]
         self.gen_text_addrs()
+
+    @property
+    def text_addrs(self):
+        return range(self.exec_start, self.exec_end, self.instr_len)
+
+    def addr2bb_idx(self, addr: int) -> int:
+        assert addr % self.instr_len == 0
+        assert self.exec_start <= addr < self.exec_end
+        return (addr - self.exec_start) // self.instr_len
 
     def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
         gv = ir.GlobalVariable(self.m, type, name)
@@ -82,7 +95,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         gv.initializer = ir.Constant(type, init)
         return gv
 
-    def get_init_mod(self):
+    def get_init_mod(self) -> ir.Module:
         m = ir.Module(name=self.exe_path.name + ".ll")
         triple = {
             ("x86_64", "Linux", "glibc"): "x86_64-linux-gnu",
@@ -99,10 +112,16 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_untrans_panic_func(self, addr: int) -> ir.Function:
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
-        builder = ir.IRBuilder(bb)
-        builder.call(self.untrans_panic, [ir.Constant(self.iptr, addr)])
-        builder.ret_void()
+        bld = ir.IRBuilder(bb)
+        call = bld.call(self.untrans_panic, [ir.Constant(self.iptr, addr)])
+        call.tail = True
+        bld.ret_void()
         return f
+
+    def gen_nop(self, bld: ir.IRBuilder) -> ir.Instruction:
+        zero = ir.Constant(self.iptr, 0)
+        nop = bld.add(zero, zero)
+        return nop
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
@@ -110,8 +129,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.global_const("entry_point", self.iptr, self.entry)
 
     def gen_addr2bb(self):
-        for addr in range(self.exec_start, self.exec_end, 4):
-            idx = (addr - self.exec_start) // 4
+        for addr in self.text_addrs:
+            idx = self.addr2bb_idx(addr)
             if self.addr2bb[idx] is None:
                 self.addr2bb[idx] = self.gen_untrans_panic_func(addr)
 
@@ -120,10 +139,36 @@ class LLVMELFLifter(ELFPCodeEmu):
         addr2bb.global_constant = True
         addr2bb.initializer = ir.Constant(addr2bb_t, self.addr2bb)
 
+    def gen_bb_func(self, addr: int) -> Optional[ir.Function]:
+        try:
+            instrs = self.translate(addr)
+        except RuntimeError:
+            return None
+        f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
+        bbs: dict[int, ir.Block] = {}
+        num_instrs = len(instrs)
+        next_bb = f.append_basic_block(f"pc_{addr:#010x}")
+        for i, instr in enumerate(instrs):
+            last = i + 1 == num_instrs
+            bb = next_bb
+            if not last:
+                next_bb = f.append_basic_block(
+                    f"pc_{instr.address.offset + self.instr_len:#010x}"
+                )
+            bld = ir.IRBuilder(bb)
+            self.gen_nop(bld)
+            if not last:
+                bld.branch(next_bb)
+            bbs[instr.address.offset] = bb
+        bld.ret_void()
+        return f
+
     def lift(self):
         self.lift_demo()
+        for addr in self.text_addrs:
+            self.addr2bb[self.addr2bb_idx(addr)] = self.gen_bb_func(addr)
         self.gen_addr2bb()
-        self.build()
+        self.compile()
 
     def lift_demo(self):
         # Create some useful types
@@ -165,7 +210,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             "64bit": 64,
         }[platform.architecture()[0]]
 
-    def build(self):
+    def compile(self):
         build_dir = Path("build")
         try:
             os.mkdir(build_dir)
@@ -190,6 +235,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_bc_o = lifted_bc_ll + ".o"
         lifted_bc_s = lifted_bc_ll + ".s"
         lifted_bc_bc = lifted_bc_ll + ".bc"
+        lifted_bc_opt_ll = lifted_bc_ll + ".opt.ll"
 
         lifted_cpp = importlib.resources.files(__package__) / "native" / "lifted.cpp"
         lifted_base = Path("build") / lifted_cpp.name
@@ -210,7 +256,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             "-std=c++20",
             "-Wall",
             "-Wextra",
-            "-O0",
+            "-Oz",
         ]
         LDFLAGS = []
         LIBS = ["-lfmt"]
@@ -223,10 +269,19 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll)
         LLVM_DIS("-o", lifted_bc_ll, lifted_bc_bc)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_bc)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_s, "-S", lifted_bc_bc, "-g0")
+        CXX(
+            *CXXFLAGS,
+            "-c",
+            "-o",
+            lifted_bc_opt_ll,
+            "-emit-llvm",
+            "-S",
+            lifted_bc_bc,
+            "-g0",
+        )
         os.remove(lifted_bc_bc)
-
-        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_ll)
-        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_s, "-S", lifted_bc_ll, "-g0")
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_o, lifted_cpp)
         CXX(*CXXFLAGS, "-c", "-o", lifted_s, "-S", lifted_cpp, "-g0")
