@@ -5,6 +5,7 @@ import os
 import platform
 from typing import Optional, Union
 
+import pretty_errors
 from llvmlite import ir
 from path import Path
 
@@ -28,6 +29,7 @@ i8 = ir.IntType(8)
 i16 = ir.IntType(16)
 i32 = ir.IntType(32)
 i64 = ir.IntType(64)
+void = ir.VoidType
 
 
 class LLVMELFLifter(ELFPCodeEmu):
@@ -35,7 +37,9 @@ class LLVMELFLifter(ELFPCodeEmu):
     exec_end: int
     exe_path = Path
     m: ir.Module
-    addr2bb: dict[int, ir.Function]
+    addr2bb: list[ir.Function]
+    bb_t: ir.FunctionType
+    trans_panic: ir.GlobalVariable
 
     def __init__(
         self,
@@ -57,11 +61,32 @@ class LLVMELFLifter(ELFPCodeEmu):
             num_exec_segs += 1
         assert num_exec_segs == 1
         iprint(f"exec start: {self.exec_start:#010x} end: {self.exec_end:#010x}")
-        self.m = self._get_init_mod()
-        self.addr2bb = {}
-        self._generate_lifted_regs_h()
 
-    def _get_init_mod(self):
+        self.m = self.get_init_mod()
+
+        if self.bitness == 32:
+            self.iptr = i32
+            self.isz = i32
+        else:
+            self.iptr = i64
+            self.isz = i64
+
+        self.bb_t = ir.FunctionType(void, [])
+        self.trans_panic = self.gen_trans_panic_decl()
+
+        self.addr2bb = []
+        for addr in range(self.exec_start, self.exec_end, 4):
+            self.addr2bb.append(self.gen_trans_panic_func(addr))
+
+        self.gen_text_addrs()
+
+    def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
+        gv = ir.GlobalVariable(self.m, type, name)
+        gv.global_constant = True
+        gv.initializer = ir.Constant(type, init)
+        return gv
+
+    def get_init_mod(self):
         m = ir.Module(name=self.exe_path.name + ".ll")
         triple = {
             ("x86_64", "Linux", "glibc"): "x86_64-linux-gnu",
@@ -70,10 +95,53 @@ class LLVMELFLifter(ELFPCodeEmu):
             m.triple = triple
         return m
 
-    def _generate_lifted_regs_h(self):
-        lifted_regs_h = (
-            importlib.resources.files(__package__) / "native" / "lifted-regs.h"
-        )
+    def gen_trans_panic_decl(self):
+        trans_panic_t = ir.FunctionType(void, [self.iptr])
+        return ir.GlobalVariable(self.m, trans_panic_t, "trans_panic")
+
+    def gen_trans_panic_func(self, addr: int) -> ir.Function:
+        f = ir.Function(self.m, self.bb_t, f"bb_0x{addr:#010x}")
+        bb = f.append_basic_block("entry")
+        addr_c = ir.Constant(self.iptr, addr)
+        builder = ir.IRBuilder(bb)
+        builder.call(self.trans_panic, [addr_c])
+        return f
+
+    def gen_text_addrs(self):
+        self.global_const("text_start", self.iptr, self.exec_start)
+        self.global_const("text_end", self.iptr, self.exec_end)
+
+    def gen_addr2bb(self):
+        addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
+        addr2bb = ir.GlobalVariable(self.m, addr2bb_t, "addr2bb")
+        addr2bb.global_constant = True
+
+    def lift(self):
+        self.lift_demo()
+        self.gen_addr2bb()
+        self.build()
+
+    def lift_demo(self):
+        # Create some useful types
+        double = ir.DoubleType()
+        fnty = ir.FunctionType(double, (double, double))
+
+        # and declare a function named "fpadd" inside it
+        func = ir.Function(self.m, fnty, name="fpadd")
+
+        # Now implement the function
+        block = func.append_basic_block(name="entry")
+        builder = ir.IRBuilder(block)
+        a, b = func.args
+        a.name = "a"
+        b.name = "b"
+        result = builder.fadd(a, b, name="res")
+        builder.ret(result)
+
+        # Print the module IR
+        print(self.m)
+
+    def gen_lifted_regs_h(self, lifted_regs_h):
         with open(lifted_regs_h, "w") as f:
             p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
             p("#pragma once")
@@ -97,8 +165,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         }[platform.architecture()[0]]
 
     def build(self):
+        build_dir = Path("build")
         try:
-            os.mkdir("build")
+            os.mkdir(build_dir)
         except FileExistsError:
             pass
 
@@ -106,13 +175,16 @@ class LLVMELFLifter(ELFPCodeEmu):
             importlib.resources.files(__package__) / "native" / "fmt" / "include"
         )
 
+        lifted_regs_h = build_dir / "lifted-regs.h"
+        self.gen_lifted_regs_h(lifted_regs_h)
+
         harness_cpp = importlib.resources.files(__package__) / "native" / "harness.cpp"
         harness_base = Path("build") / harness_cpp.name
         harness_o = harness_base + ".o"
         harness_ll = harness_base + ".ll"
         harness_s = harness_base + ".s"
 
-        lifted_bc_ll = Path("build") / "lifted-bc.ll"
+        lifted_bc_ll = build_dir / "lifted-bc.ll"
         self.write_ir(lifted_bc_ll)
         lifted_bc_o = lifted_bc_ll + ".o"
         lifted_bc_s = lifted_bc_ll + ".s"
@@ -124,11 +196,21 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_ll = lifted_base + ".ll"
         lifted_s = lifted_base + ".s"
 
-        lifted_segs_s = Path("build") / "lifted-segs.s"
+        lifted_segs_s = build_dir / "lifted-segs.s"
         self.gen_segs(lifted_segs_s)
-        lifted_segs_o = Path("build") / "lifted-segs.s.o"
+        lifted_segs_o = lifted_segs_s + ".o"
 
-        CXXFLAGS = ["-I", fmt_inc_dir, "-g", "-std=c++20", "-Wall", "-Wextra", "-Oz"]
+        CXXFLAGS = [
+            "-I",
+            fmt_inc_dir,
+            "-I",
+            build_dir,
+            "-g",
+            "-std=c++20",
+            "-Wall",
+            "-Wextra",
+            "-Oz",
+        ]
         LDFLAGS = []
         LIBS = ["-lfmt"]
 
@@ -159,10 +241,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             lifted_segs_o,
             *LIBS,
         )
-
-    def lift(self):
-        self.lift_demo()
-        self.build()
 
     def gen_segs(self, asm_out_path):
         systy = platform.system().lower()
@@ -214,24 +292,3 @@ class LLVMELFLifter(ELFPCodeEmu):
                 p(f"\t{host_ptr_t}\t{seg_name}")
             p(f"\t.size\tsegs, {num_segs * (2 * 4 + 1 * self.host_bitness // 8)}")
             p()
-
-    def lift_demo(self):
-
-        # Create some useful types
-        double = ir.DoubleType()
-        fnty = ir.FunctionType(double, (double, double))
-
-        # and declare a function named "fpadd" inside it
-        func = ir.Function(self.m, fnty, name="fpadd")
-
-        # Now implement the function
-        block = func.append_basic_block(name="entry")
-        builder = ir.IRBuilder(block)
-        a, b = func.args
-        a.name = "a"
-        b.name = "b"
-        result = builder.fadd(a, b, name="res")
-        builder.ret(result)
-
-        # Print the module IR
-        print(self.m)

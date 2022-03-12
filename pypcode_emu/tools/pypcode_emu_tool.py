@@ -1,7 +1,7 @@
 import argparse
 
-from ..elf import BinaryError
-from ..emu import ELFPCodeEmu, PCodeEmu
+from pypcode_emu.elf import BinaryError
+from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
 
 
 def real_main(args):

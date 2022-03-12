@@ -1,6 +1,6 @@
 import argparse
 
-from ..llvm import LLVMELFLifter
+from pypcode_emu.llvm import LLVMELFLifter
 
 
 def real_main(args):

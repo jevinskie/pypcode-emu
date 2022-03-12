@@ -1,5 +1,4 @@
-pypcode_emu/native/lifted-regs.h
-
+**/build/
 **/*.s
 **/*.bc
 **/*.o

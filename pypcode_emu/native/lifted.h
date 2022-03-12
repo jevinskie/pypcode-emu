@@ -34,6 +34,8 @@ extern regs_t regs;
 extern const u8 num_segs;
 extern const seg_t segs[];
 
+extern uptr text_start;
+extern uptr text_end;
 extern bb_t *addr2bb;
 
 void untran_panic(uptr pc);
