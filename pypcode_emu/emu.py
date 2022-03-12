@@ -108,6 +108,7 @@ class PCodeEmu:
         self.initial_sp = initial_sp
         self.ret_addr = ret_addr
         self.bitness = int(bitness)
+        self.be = endianness == "BE"
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = memoryview(mmap.mmap(-1, 0x1_0000_0000))
         self.register = memoryview(mmap.mmap(-1, 0x1000))

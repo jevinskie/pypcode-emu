@@ -31,6 +31,10 @@ i64 = ir.IntType(64)
 void = ir.VoidType()
 
 
+def ibN(nbytes: int) -> ir.Type:
+    return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
+
+
 class LLVMELFLifter(ELFPCodeEmu):
     exec_start: int
     exec_end: int
@@ -80,6 +84,15 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.addr2bb = [None for _ in self.text_addrs]
         self.gen_text_addrs()
 
+        self.regs_t, self.regs_gv = self.gen_ir_regs({"pc": self.entry})
+
+    @property
+    def host_bitness(self):
+        return {
+            "32bit": 32,
+            "64bit": 64,
+        }[platform.architecture()[0]]
+
     @property
     def text_addrs(self):
         return range(self.exec_start, self.exec_end, self.instr_len)
@@ -89,12 +102,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         assert self.exec_start <= addr < self.exec_end
         return (addr - self.exec_start) // self.instr_len
 
-    def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
-        gv = ir.GlobalVariable(self.m, type, name)
-        gv.global_constant = True
-        gv.initializer = ir.Constant(type, init)
-        return gv
-
     def get_init_mod(self) -> ir.Module:
         m = ir.Module(name=self.exe_path.name + ".ll")
         triple = {
@@ -103,6 +110,34 @@ class LLVMELFLifter(ELFPCodeEmu):
         if triple:
             m.triple = triple
         return m
+
+    def gen_ir_regs(self, init: Optional[dict[str, int]] = None):
+        if init is None:
+            init = {}
+        reg_names = self.ctx.get_register_names()
+        struct_mem_types = []
+        struct_mem_vals = []
+        for rname in reg_names:
+            reg = self.ctx.get_register(rname)
+            struct_mem_types.append(ibN(reg.size))
+            struct_mem_vals.append(init.get(rname, 0))
+
+        regs_t = self.m.context.get_identified_type("regs_t")
+        regs_t.set_body(*struct_mem_types)
+        regs_gv = self.global_var("regs", regs_t, struct_mem_vals)
+        return regs_t, regs_gv
+
+    def global_var(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
+        gv = ir.GlobalVariable(self.m, type, name)
+        gv.global_constant = False
+        gv.initializer = ir.Constant(type, init)
+        return gv
+
+    def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
+        gv = ir.GlobalVariable(self.m, type, name)
+        gv.global_constant = True
+        gv.initializer = ir.Constant(type, init)
+        return gv
 
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
@@ -146,19 +181,14 @@ class LLVMELFLifter(ELFPCodeEmu):
             return None
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bbs: dict[int, ir.Block] = {}
-        num_instrs = len(instrs)
-        next_bb = f.append_basic_block(f"pc_{addr:#010x}")
-        for i, instr in enumerate(instrs):
-            last = i + 1 == num_instrs
-            bb = next_bb
-            if not last:
-                next_bb = f.append_basic_block(
-                    f"pc_{instr.address.offset + self.instr_len:#010x}"
-                )
+        prev_bld = None
+        for instr in instrs:
+            bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             bld = ir.IRBuilder(bb)
+            if prev_bld:
+                prev_bld.branch(bb)
             self.gen_nop(bld)
-            if not last:
-                bld.branch(next_bb)
+            prev_bld = bld
             bbs[instr.address.offset] = bb
         bld.ret_void()
         return f
@@ -187,6 +217,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         result = builder.fadd(a, b, name="res")
         builder.ret(result)
 
+    def write_ir(self, asm_out_path):
+        open(asm_out_path, "w").write(str(self.m))
+
     def gen_lifted_regs_h(self, lifted_regs_h):
         with open(lifted_regs_h, "w") as f:
             p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
@@ -199,16 +232,6 @@ class LLVMELFLifter(ELFPCodeEmu):
                 p(f"    u{reg.size * 8} {rname};")
             p("} regs_t;")
             p()
-
-    def write_ir(self, asm_out_path):
-        open(asm_out_path, "w").write(str(self.m))
-
-    @property
-    def host_bitness(self):
-        return {
-            "32bit": 32,
-            "64bit": 64,
-        }[platform.architecture()[0]]
 
     def compile(self):
         build_dir = Path("build")
@@ -231,7 +254,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         harness_s = harness_base + ".s"
 
         lifted_bc_ll = build_dir / "lifted-bc.ll"
-        self.write_ir(lifted_bc_ll)
+        lifted_bc_ll_orig = build_dir / "lifted-bc.orig.ll"
+        self.write_ir(lifted_bc_ll_orig)
         lifted_bc_o = lifted_bc_ll + ".o"
         lifted_bc_s = lifted_bc_ll + ".s"
         lifted_bc_bc = lifted_bc_ll + ".bc"
@@ -267,7 +291,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_segs_o, lifted_segs_s)
 
-        LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll)
+        LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll_orig)
         LLVM_DIS("-o", lifted_bc_ll, lifted_bc_bc)
         CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_bc)
         CXX(*CXXFLAGS, "-c", "-o", lifted_bc_s, "-S", lifted_bc_bc, "-g0")
