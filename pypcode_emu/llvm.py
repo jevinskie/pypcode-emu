@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib.resources
 import os
 import platform
-from typing import Callable, Optional, Union
+from typing import Callable, ClassVar, Optional, Union
 
+from icecream import ic
 from llvmlite import ir
 from path import Path
 from pypcode import Varnode
+from rich import inspect as rinspect
 
 from .elf import PF, PT
 from .emu import ELFPCodeEmu, Int, UniqueBuf
@@ -34,6 +36,46 @@ void = ir.VoidType()
 
 def ibN(nbytes: int) -> ir.Type:
     return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
+
+
+class IntVal:
+    bld: ClassVar[ir.IRBuilder]
+
+    def __new__(cls, v: ir.Value, *args, **kwargs):
+        # print(f"__new__ cls: {cls} v: {v} args: {args} kwargs: {kwargs}")
+        # print(f"__new__ cls.bld: {cls.bld}")
+        # print(f"__new__ v type: {type(v)} v.type: {v.type} type(v.type): {type(v.type)}")
+        sub_ty_name = f"{cls.__name__}_{v.type}"
+        # print(f"__new__ subtype name: {sub_ty_name}")
+        sub_ty = type(sub_ty_name, (cls, type(v)), {"__new__": v.__new__})
+        # rinspect(sub_ty, all=True)
+        # print(f"sub_ty: {sub_ty}")
+        r = sub_ty.__new__(cls)
+        print(type(r))
+        # print(f"r: {r}")
+        return r
+
+    def __init__(self, *args, **kwargs):
+        # print(f"__init__ args: {args} kwargs: {kwargs}")
+        # print(f"self type: {type(self)}")
+        # rinspect(self, all=True)
+        super().__init__()
+        print(f"self type: {type(self)} val: {self}")
+
+    @property
+    def size(self):
+        return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
+
+    # these are dummy since, unlike python, everything is 2's compliment
+    def sext(self) -> IntVal:
+        return self
+
+    def s2u(self) -> IntVal:
+        return self
+
+    @classmethod
+    def class_with_builder(cls, builder: ir.IRBuilder) -> type:
+        return type("BoundIntVal", (IntVal,), {"bld": builder})
 
 
 class Intrinsics:
@@ -78,7 +120,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exe_path = Path(exe_path)
         self.m = self.get_init_mod()
         self.bld = ir.IRBuilder()
-        super().__init__(elf_path, entry=entry)
+        int_t = IntVal.class_with_builder(self.bld)
+        super().__init__(elf_path, entry=entry, int_t=int_t)
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
         self.instr_len = instr_len
@@ -185,29 +228,23 @@ class LLVMELFLifter(ELFPCodeEmu):
         return gv
 
     def get_register_prop(self, name: str) -> property:
-        def getter(self) -> Int:
+        def getter(self) -> IntVal:
             raise NotImplementedError(f'get_register_prop getter called with "{name}"')
 
-        def setter(self, val: Union[int, Int]) -> None:
+        def setter(self, val: Union[int, IntVal]) -> None:
             raise NotImplementedError(f'get_register_prop setter called with "{val}"')
 
         return property(getter, setter)
 
     def getter_for_varnode(
         self, vn: Union[Varnode, Callable], unique: UniqueBuf
-    ) -> Callable[[], ir.Value]:
+    ) -> Callable[[], IntVal]:
         if callable(vn):
             vn = vn()
         if vn.space is self.unique_space:
 
-            def get_unique() -> Int:
-                raise NotImplementedError(str(vn))
-                return self.int_t(
-                    int.from_bytes(
-                        unique[vn.offset : vn.offset + vn.size], vn.space.endianness
-                    ),
-                    vn.size,
-                )
+            def get_unique() -> IntVal:
+                return unique[vn.offset : vn.offset + vn.size]
 
             return get_unique
         elif vn.space is self.const_space:
@@ -216,15 +253,15 @@ class LLVMELFLifter(ELFPCodeEmu):
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
 
-            def get_register() -> ir.Instruction:
+            def get_register() -> IntVal:
                 gep = self.regs_gv.gep([i32(0), i32(ridx)])
-                return self.bld.load(gep, name=rname)
+                return self.int_t(self.bld.load(gep, name=rname))
 
             return get_register
         elif vn.space is self.ram_space:
             raise NotImplementedError(str(vn))
 
-            def get_ram() -> Int:
+            def get_ram() -> IntVal:
                 return self.int_t(
                     int.from_bytes(
                         self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
@@ -238,12 +275,12 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def setter_for_varnode(
         self, vn: Union[Varnode, Callable], unique: UniqueBuf
-    ) -> Callable[[ir.Value], None]:
+    ) -> Callable[[IntVal], None]:
         if callable(vn):
             vn = vn()
         if vn.space is self.unique_space:
 
-            def set_unique(v: ir.Value):
+            def set_unique(v: IntVal):
                 unique[vn.offset : vn.offset + vn.size] = v
 
             return set_unique
@@ -253,17 +290,15 @@ class LLVMELFLifter(ELFPCodeEmu):
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
 
-            def set_register(v: ir.Value):
-                gep = self.bld.gep(
-                    self.regs_gv, [0, ridx], inbounds=True, name=f"set_{rname}_gep"
-                )
-                self.regs_gv
+            def set_register(v: ir.Value) -> ir.StoreInstr:
+                gep = self.regs_gv.gep([i32(0), i32(ridx)])
+                return self.bld.store(gep, v)
 
             return set_register
         elif vn.space is self.ram_space:
             raise NotImplementedError(str(vn))
 
-            def set_ram(v: Int):
+            def set_ram(v: IntVal):
                 if not isinstance(v, self.int_t):
                     v = self.int_t(v, vn.size)
                 else:

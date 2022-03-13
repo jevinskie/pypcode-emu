@@ -73,11 +73,7 @@ class UniqueBuf(dict):
         super().__setitem__((byte_off, num_bytes), value)
 
 
-class BinaryOpMagic(type):
-    pass
-
-
-class Int(int, metaclass=BinaryOpMagic):
+class Int(int):
     size: int
 
     def __new__(cls, value: int, size: int):
@@ -85,10 +81,8 @@ class Int(int, metaclass=BinaryOpMagic):
         res.size = size
         return res
 
-    def sext(self, size: Optional[int] = None) -> Int:
-        if size is None:
-            size = self.size
-        return type(self)(sext(self, size), self.size)
+    def sext(self, size: int) -> Int:
+        return type(self)(sext(self, size), size)
 
     def s2u(self) -> Int:
         return type(self)(s2u(self, self.size), self.size)
@@ -557,8 +551,10 @@ class PCodeEmu:
 
 
 class RawBinaryPCodeEmu(PCodeEmu):
-    def __init__(self, spec: str, bin_path: str, base: int = 0, entry: int = 0):
-        super().__init__(spec, entry)
+    def __init__(
+        self, spec: str, bin_path: str, base: int = 0, entry: int = 0, int_t: type = Int
+    ):
+        super().__init__(spec, entry, int_t=int_t)
         self.bin = open(bin_path, "rb").read()
         self.memcpy(base, self.bin)
 
@@ -568,7 +564,11 @@ class ELFPCodeEmu(PCodeEmu):
     segments: [PhdrData]
 
     def __init__(
-        self, elf_path: str, entry: Optional[Union[str, int]] = None, arg0: int = 0
+        self,
+        elf_path: str,
+        entry: Optional[Union[str, int]] = None,
+        arg0: int = 0,
+        int_t: type = Int,
     ):
         self.elf = ELF(elf_path)
         machine = {
@@ -592,7 +592,9 @@ class ELFPCodeEmu(PCodeEmu):
             except ValueError:
                 assert entry in self.elf.symbols
                 entry = self.elf.symbols[entry]
-        super().__init__(f"{machine}:{endianness}:{bitness}:default", entry, arg0=arg0)
+        super().__init__(
+            f"{machine}:{endianness}:{bitness}:default", entry, arg0=arg0, int_t=int_t
+        )
         self.segments = []
         for seg in self.elf.segments:
             if seg.type != PT.LOAD:
