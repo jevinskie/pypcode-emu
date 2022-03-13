@@ -168,7 +168,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
         bld = ir.IRBuilder(bb)
-        call = bld.call(self.untrans_panic, [addr])
+        call = bld.call(self.untrans_panic, [ir.Constant(self.iptr, addr)])
         call.tail = True
         bld.ret_void()
         return f
