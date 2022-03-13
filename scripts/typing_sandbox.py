@@ -59,12 +59,21 @@ fty = ir.FunctionType(void, [])
 f = ir.Function(m, fty, "dummy")
 bld = ir.IRBuilder(f.append_basic_block("entry"))
 
+BIntVal = IntVal.class_with_builder(bld)
+
 iconst = i32(243)
-print(f"iconst: {iconst}")
+print(f"iconst: {iconst} type(iconst): {type(iconst)} iconst.type: {iconst.type}")
+print(f"isinstance(iconst, ir.Value): {isinstance(iconst, ir.Value)}")
+print(f"type(iconst).mro(): {type(iconst).mro()}")
 
-i = IntVal(iconst)
+i = BIntVal(iconst)
 
-print(f"i: {i}")
+print(i.size)
+
+print(f"i: {i} type(i): {type(i)} i.type: {i.type}")
+print(f"isinstance(i, ir.Value): {isinstance(i, ir.Value)}")
+print(f"type(i).mro(): {type(i).mro()}")
+print(i.s2u())
 
 bld.ret_void()
 
