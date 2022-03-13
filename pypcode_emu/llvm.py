@@ -34,6 +34,13 @@ void = ir.VoidType()
 def ibN(nbytes: int) -> ir.Type:
     return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
 
+class Intrinsics:
+    bswap16: ir.Function
+    bswap16_t = ir.FunctionType(i16, [i16])
+    bswap32: ir.Function
+    bswap32_t = ir.FunctionType(i32, [i32])
+    bswap64: ir.Function
+    bswap64_t = ir.FunctionType(i64, [i64])
 
 class LLVMELFLifter(ELFPCodeEmu):
     exec_start: int
@@ -44,6 +51,9 @@ class LLVMELFLifter(ELFPCodeEmu):
     bb_t: ir.FunctionType
     untrans_panic: ir.Function
     instr_len: int
+    regs_t: ir.IdentifiedStructType
+    regs_gv: ir.GlobalVariable
+    intrinsics: Intrinsics
 
     def __init__(
         self,
@@ -85,6 +95,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.gen_text_addrs()
 
         self.regs_t, self.regs_gv = self.gen_ir_regs({"pc": self.entry})
+
+        self.intrinsics = Intrinsics()
+        bs16, bs32, bs64 = self.gen_bswap_decls()
+        self.intrinsics.bswap16, self.intrinsics.bswap32, self.intrinsics.bswap64 = bs16, bs32, bs64
 
     @property
     def host_bitness(self):
@@ -157,6 +171,17 @@ class LLVMELFLifter(ELFPCodeEmu):
         zero = ir.Constant(self.iptr, 0)
         nop = bld.add(zero, zero)
         return nop
+
+    def gen_bswap_decls(self):
+        bs16 = self.m.declare_intrinsic("llvm.bswap.i16", fnty=Intrinsics.bswap16_t)
+        bs32 = self.m.declare_intrinsic("llvm.bswap.i32", fnty=Intrinsics.bswap32_t)
+        bs64 = self.m.declare_intrinsic("llvm.bswap.i64", fnty=Intrinsics.bswap64_t)
+        return bs16, bs32, bs64
+
+    def gen_bswap(self, val: ir.Value, bld: ir.IRBuilder) -> ir.Instruction:
+        assert type(val) in (i16, i32, i64)
+
+
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
