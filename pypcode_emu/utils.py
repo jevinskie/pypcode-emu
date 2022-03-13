@@ -3,6 +3,8 @@ import subprocess
 import sys
 from typing import Callable
 
+from bidict import bidict
+
 
 def first(iterable, default=None):
     for item in iterable:
@@ -42,3 +44,13 @@ def gen_cmd(bin_name: str) -> Callable:
     bin_path = shutil.which(bin_name)
     assert bin_path is not None
     return lambda *args, **kwargs: run_cmd(bin_path, *args, **kwargs)
+
+
+class UniqueBiDict(bidict):
+    def __getitem__(self, item):
+        a = self._fwdm.get(item, None)
+        b = self._invm.get(item, None)
+        if a is None and b is None:
+            raise KeyError(item)
+        assert (a is None) ^ (b is None)
+        return a if b is None else b

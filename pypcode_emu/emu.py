@@ -128,40 +128,49 @@ class PCodeEmu:
 
         self.regs = Regs()
         for reg_name in reg_names:
-            setattr(Regs, reg_name, self.get_varnode_sym_prop(reg_name))
-        for real_reg_name, alias_reg_name in (
-            ("r1", "sp"),
-            ("r15", "lr"),
-            ("r5", "arg0"),
-            ("r3", "ret"),
-            ("r12", "int_num"),
-        ):
+            setattr(Regs, reg_name, self.get_register_prop(reg_name))
+        for real_reg_name, alias_reg_name in self.reg_aliases.items():
             setattr(Regs, alias_reg_name, getattr(Regs, real_reg_name))
+        self.initialize_emu_state()
+        self.last_csmith_checksum = None
+
+    @property
+    def reg_aliases(self):
+        return UniqueBiDict(
+            {
+                "r1": "sp",
+                "r15": "lr",
+                "r5": "arg0",
+                "r3": "ret",
+                "r12": "int_num",
+            }
+        )
+
+    def unalias_reg(self, reg_name: str) -> str:
+        return self.reg_aliases[reg_name]
+
+    def initialize_emu_state(self):
         self.regs.pc = self.entry
         self.regs.sp = self.initial_sp
         self.regs.lr = self.ret_addr - 8
-        self.last_csmith_checksum = None
 
-    def get_varnode_sym_prop(self, name: str):
-        sym = first_where_key_is(self.sla.sleigh.symbol_table.varnode_sym, "name", name)
-        assert sym is not None
-        sz = int(sym["size"])
-        space = first_where_key_is(self.sla.sleigh.spaces.space, "name", sym["space"])
-        bigendian = space["bigendian"] == "true"
-        space_buf = self.space_bufs[sym["space"]]
-        off = int(sym["offset"], 16)
+    def get_register_prop(self, name: str):
+        varnode = self.ctx.get_register(name)
+        bigendian = varnode.space.endianness == "big"
+        space_buf = self.space_bufs[varnode.space.name]
+        off = varnode.offset
 
         struct_fmt = (">" if bigendian else "<") + {
             1: "B",
             2: "H",
             4: "I",
             8: "Q",
-        }[sz]
+        }[varnode.size]
         unpack_from = struct.Struct(struct_fmt).unpack_from
         pack_into = struct.Struct(struct_fmt).pack_into
 
         def getter(self) -> Int:
-            return Int(unpack_from(space_buf, off)[0], off, sz)
+            return Int(unpack_from(space_buf, off)[0], off, varnode.size)
 
         def setter(self, val: Union[int, Int]) -> None:
             pack_into(space_buf, off, val)
