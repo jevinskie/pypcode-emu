@@ -147,16 +147,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         regs_gv = self.global_var("regs", regs_t, struct_mem_vals)
         return regs_t, regs_gv
 
-    def global_var(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
-        gv = ir.GlobalVariable(self.m, type, name)
+    def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
+        gv = ir.GlobalVariable(self.m, ty, name)
         gv.global_constant = False
-        gv.initializer = ir.Constant(type, init)
+        gv.initializer = ty(init)
         return gv
 
-    def global_const(self, name: str, type: ir.Type, init) -> ir.GlobalVariable:
-        gv = ir.GlobalVariable(self.m, type, name)
+    def global_const(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
+        gv = ir.GlobalVariable(self.m, ty, name)
         gv.global_constant = True
-        gv.initializer = ir.Constant(type, init)
+        gv.initializer = ty(init)
         return gv
 
     def gen_utrans_panic_decl(self):
@@ -168,13 +168,13 @@ class LLVMELFLifter(ELFPCodeEmu):
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
         bld = ir.IRBuilder(bb)
-        call = bld.call(self.untrans_panic, [ir.Constant(self.iptr, addr)])
+        call = bld.call(self.untrans_panic, [self.iptr(addr)])
         call.tail = True
         bld.ret_void()
         return f
 
     def gen_nop(self, bld: ir.IRBuilder) -> ir.Instruction:
-        zero = ir.Constant(self.iptr, 0)
+        zero = self.iptr(0)
         nop = bld.add(zero, zero)
         return nop
 
