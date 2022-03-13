@@ -102,6 +102,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     instr_len: int
     regs_t: ir.IdentifiedStructType
     regs_gv: ir.GlobalVariable
+    mem_t: ir.ArrayType
+    mem_gv: ir.GlobalVariable
     intrinsics: Intrinsics
     bld: ir.IRBuilder
 
@@ -202,6 +204,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_t.set_body(*struct_mem_types)
         self.regs_gv = self.global_var("regs", self.regs_t, struct_mem_vals)
 
+        # FIXME rename this function
+        self.mem_t = ir.ArrayType(i8, 0x1_0000_0000)
+        self.mem_gv = ir.GlobalVariable(self.m, self.mem_t, "mem")
+
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
         if init is None:
             init = {}
@@ -254,15 +260,21 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return get_register
         elif vn.space is self.ram_space:
-            raise NotImplementedError(str(vn))
 
             def get_ram() -> IntVal:
-                return self.int_t(
-                    int.from_bytes(
-                        self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
-                    ),
-                    vn.size,
+                gep = self.bld.gep(
+                    self.mem_gv,
+                    [i64(0), i64(vn.offset)],
+                    inbounds=True,
+                    name="mem_load_gep",
                 )
+                load_t = ibN(vn.size)
+                load_ptr = self.bld.bitcast(
+                    gep, load_t.as_pointer(), name="mem_load_ptr"
+                )
+                load_val = self.bld.load(load_ptr, name="mem_load")
+                bswapped = self.gen_bswap(load_val)
+                return self.int_t(bswapped)
 
             return get_ram
         else:
@@ -285,22 +297,27 @@ class LLVMELFLifter(ELFPCodeEmu):
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
 
-            def set_register(v: ir.Value) -> ir.StoreInstr:
-                gep = self.regs_gv.gep([i32(0), i32(ridx)])
-                return self.bld.store(gep, v)
+            def set_register(v: IntVal) -> IntVal:
+                return self.int_t(
+                    self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
+                )
 
             return set_register
         elif vn.space is self.ram_space:
-            raise NotImplementedError(str(vn))
 
             def set_ram(v: IntVal):
-                if not isinstance(v, self.int_t):
-                    v = self.int_t(v, vn.size)
-                else:
-                    assert v.size == vn.size
-                self.ram[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
-                    vn.size, vn.space.endianness
+                bswapped = self.gen_bswap(v)
+                gep = self.bld.gep(
+                    self.mem_gv,
+                    [i64(0), i64(vn.offset)],
+                    inbounds=True,
+                    name="mem_store_gep",
                 )
+                store_t = ibN(vn.size)
+                store_ptr = self.bld.bitcast(
+                    gep, store_t.as_pointer(), name="mem_store_ptr"
+                )
+                self.bld.store(bswapped, store_ptr)
 
             return set_ram
         else:
@@ -333,7 +350,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         if self.bitness == self.host_bitness:
             return val
         name = f"{val.name}.bswap" if isinstance(val, ir.NamedValue) else "bswap"
-        return self.bld.call(self.intrinsics.bswap(type(val)), [val], name=name)
+        return self.bld.call(self.intrinsics.bswap(val.type), [val], name=name)
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
@@ -363,7 +380,13 @@ class LLVMELFLifter(ELFPCodeEmu):
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             self.bld.position_at_end(bb)
             pcg = self.getter_for_varnode(self.reg_vn("pc"), UniqueBuf())
-            pcg()
+            arg0s = self.setter_for_varnode(self.reg_vn("arg0"), UniqueBuf())
+            arg0s(pcg())
+            p1000 = self.mem_vn(0x1000, 4)
+            p4000 = self.mem_vn(0x4000, 4)
+            g1000 = self.getter_for_varnode(p1000, UniqueBuf())
+            s4000 = self.setter_for_varnode(p4000, UniqueBuf())
+            s4000(g1000())
             if prev_bb:
                 with self.bld.goto_block(prev_bb):
                     self.bld.branch(bb)

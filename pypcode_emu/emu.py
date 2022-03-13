@@ -50,14 +50,14 @@ def subpiece(v, nbytes_trunc, nbytes_in, nbytes_out):
 
 
 class UniqueBuf(dict):
-    def __getitem__(self, key: slice) -> bytes:
+    def __getitem__(self, key: slice):
         byte_off, byte_off_end, step = key.start, key.stop, key.step
         assert byte_off is not None and byte_off_end is not None
         assert step is None
         num_bytes = byte_off_end - byte_off
         try:
             return super().__getitem__((byte_off, num_bytes))
-        except KeyError as e:
+        except KeyError:
             eprint(
                 f"unique[{byte_off:#06x}:{num_bytes}] aka {byte_off} lookup error. Contents:"
             )
@@ -173,6 +173,9 @@ class PCodeEmu:
 
     def reg_vn(self, reg_name: str) -> Varnode:
         return self.reg_vns[self.reg_idx(reg_name)]
+
+    def mem_vn(self, addr: int, size: int) -> Varnode:
+        return Varnode(self.ctx, self.ram_space, addr, size)
 
     def gen_reg_state(self):
         pass
