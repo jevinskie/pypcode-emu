@@ -205,7 +205,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_gv = self.global_var("regs", self.regs_t, struct_mem_vals)
 
         # FIXME rename this function
-        self.mem_t = ir.ArrayType(i8, 0x1_0000_0000)
+        self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
         self.mem_gv = ir.GlobalVariable(self.m, self.mem_t, "mem")
 
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
@@ -262,8 +262,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         elif vn.space is self.ram_space:
 
             def get_ram() -> IntVal:
+                mem_ptr = self.bld.load(self.mem_gv, name="mem_ptr")
                 gep = self.bld.gep(
-                    self.mem_gv,
+                    mem_ptr,
                     [i64(0), i64(vn.offset)],
                     inbounds=True,
                     name="mem_load_gep",
@@ -307,8 +308,9 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             def set_ram(v: IntVal):
                 bswapped = self.gen_bswap(v)
+                mem_ptr = self.bld.load(self.mem_gv, name="mem_ptr")
                 gep = self.bld.gep(
-                    self.mem_gv,
+                    mem_ptr,
                     [i64(0), i64(vn.offset)],
                     inbounds=True,
                     name="mem_store_gep",
