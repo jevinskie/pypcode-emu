@@ -10,6 +10,7 @@ from llvmlite import ir
 from path import Path
 from pypcode import Varnode
 from rich import inspect as rinspect
+from wrapt import ObjectProxy
 
 from .elf import PF, PT
 from .emu import ELFPCodeEmu, Int, UniqueBuf
@@ -38,40 +39,34 @@ def ibN(nbytes: int) -> ir.Type:
     return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
 
 
-class IntVal:
+class IntValBase:
     bld: ClassVar[ir.IRBuilder]
-
-    def __new__(cls, v: ir.Value, *args, **kwargs):
-        # print(f"__new__ cls: {cls} v: {v} args: {args} kwargs: {kwargs}")
-        # print(f"__new__ cls.bld: {cls.bld}")
-        # print(f"__new__ v type: {type(v)} v.type: {v.type} type(v.type): {type(v.type)}")
-        sub_ty_name = f"{cls.__name__}_{v.type}"
-        # print(f"__new__ subtype name: {sub_ty_name}")
-        sub_ty = type(sub_ty_name, (cls, type(v)), {"__new__": v.__new__})
-        # rinspect(sub_ty, all=True)
-        # print(f"sub_ty: {sub_ty}")
-        r = sub_ty.__new__(cls)
-        print(type(r))
-        # print(f"r: {r}")
-        return r
-
-    def __init__(self, *args, **kwargs):
-        # print(f"__init__ args: {args} kwargs: {kwargs}")
-        # print(f"self type: {type(self)}")
-        # rinspect(self, all=True)
-        super().__init__()
-        print(f"self type: {type(self)} val: {self}")
 
     @property
     def size(self):
+        print(f"size: {self}")
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
     # these are dummy since, unlike python, everything is 2's compliment
     def sext(self) -> IntVal:
+        print(f"sext: {self}")
         return self
 
     def s2u(self) -> IntVal:
+        print(f"s2u: {self}")
         return self
+
+
+class IntVal(ObjectProxy, IntValBase):
+    def __new__(cls, wrapped):
+        if isinstance(wrapped, IntValBase):
+            return wrapped
+        return super().__new__(cls)
+
+    def __init__(self, wrapped):
+        if isinstance(wrapped, IntValBase):
+            return
+        super().__init__(wrapped)
 
     @classmethod
     def class_with_builder(cls, builder: ir.IRBuilder) -> type:
