@@ -3,13 +3,14 @@ from __future__ import annotations
 import importlib.resources
 import os
 import platform
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from llvmlite import ir
 from path import Path
+from pypcode import Varnode
 
 from .elf import PF, PT
-from .emu import ELFPCodeEmu
+from .emu import ELFPCodeEmu, Int, UniqueBuf
 from .utils import gen_cmd
 
 real_print = print
@@ -65,6 +66,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     regs_t: ir.IdentifiedStructType
     regs_gv: ir.GlobalVariable
     intrinsics: Intrinsics
+    bld: ir.IRBuilder
 
     def __init__(
         self,
@@ -75,6 +77,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     ):
         self.exe_path = Path(exe_path)
         self.m = self.get_init_mod()
+        self.bld = ir.IRBuilder()
         super().__init__(elf_path, entry=entry)
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
@@ -104,8 +107,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.addr2bb = [None for _ in self.text_addrs]
         self.gen_text_addrs()
 
-        self.regs_t, self.regs_gv = None, None
-
         self.intrinsics = Intrinsics()
         bs16, bs32, bs64 = self.gen_bswap_decls()
         self.intrinsics.bswap16, self.intrinsics.bswap32, self.intrinsics.bswap64 = (
@@ -117,8 +118,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             "llvm.donothing", fnty=Intrinsics.nop_t
         )
 
-    def initialize_emu_state(self):
-        self.regs_t, self.regs_gv = self.gen_ir_regs(
+    def init_reg_state(self):
+        self.init_ir_regs(
             {
                 "pc": self.entry,
                 self.unalias_reg("sp"): self.initial_sp,
@@ -151,21 +152,25 @@ class LLVMELFLifter(ELFPCodeEmu):
             m.triple = triple
         return m
 
-    def gen_ir_regs(self, init: Optional[dict[str, int]] = None):
-        if init is None:
-            init = {}
-        reg_names = self.ctx.get_register_names()
+    def gen_reg_state(self):
         struct_mem_types = []
         struct_mem_vals = []
-        for rname in reg_names:
+        for rname in self.ctx.get_register_names():
             reg = self.ctx.get_register(rname)
             struct_mem_types.append(ibN(reg.size))
-            struct_mem_vals.append(init.get(rname, 0))
+            struct_mem_vals.append(0)
 
-        regs_t = self.m.context.get_identified_type("regs_t")
-        regs_t.set_body(*struct_mem_types)
-        regs_gv = self.global_var("regs", regs_t, struct_mem_vals)
-        return regs_t, regs_gv
+        self.regs_t = self.m.context.get_identified_type("regs_t")
+        self.regs_t.set_body(*struct_mem_types)
+        self.regs_gv = self.global_var("regs", self.regs_t, struct_mem_vals)
+
+    def init_ir_regs(self, init: Optional[dict[str, int]] = None):
+        if init is None:
+            init = {}
+        struct_mem_vals = []
+        for rname in self.ctx.get_register_names():
+            struct_mem_vals.append(init.get(rname, 0))
+        self.regs_gv.initializer = self.regs_t(struct_mem_vals)
 
     def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
         gv = ir.GlobalVariable(self.m, ty, name)
@@ -179,6 +184,98 @@ class LLVMELFLifter(ELFPCodeEmu):
         gv.initializer = ty(init)
         return gv
 
+    def get_register_prop(self, name: str) -> property:
+        def getter(self) -> Int:
+            raise NotImplementedError(f'get_register_prop getter called with "{name}"')
+
+        def setter(self, val: Union[int, Int]) -> None:
+            raise NotImplementedError(f'get_register_prop setter called with "{val}"')
+
+        return property(getter, setter)
+
+    def getter_for_varnode(
+        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+    ) -> Callable[[], ir.Value]:
+        if callable(vn):
+            vn = vn()
+        if vn.space is self.unique_space:
+
+            def get_unique() -> Int:
+                raise NotImplementedError(str(vn))
+                return self.int_t(
+                    int.from_bytes(
+                        unique[vn.offset : vn.offset + vn.size], vn.space.endianness
+                    ),
+                    vn.size,
+                )
+
+            return get_unique
+        elif vn.space is self.const_space:
+            return lambda: ibN(vn.size)(vn.offset)
+        elif vn.space is self.register_space:
+            rname = vn.get_register_name()
+            ridx = self.reg_idx(rname)
+
+            def get_register() -> ir.Instruction:
+                gep = self.regs_gv.gep([i32(0), i32(ridx)])
+                return self.bld.load(gep, name=rname)
+
+            return get_register
+        elif vn.space is self.ram_space:
+            raise NotImplementedError(str(vn))
+
+            def get_ram() -> Int:
+                return self.int_t(
+                    int.from_bytes(
+                        self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
+                    ),
+                    vn.size,
+                )
+
+            return get_ram
+        else:
+            raise NotImplementedError(vn.space.name)
+
+    def setter_for_varnode(
+        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+    ) -> Callable[[ir.Value], None]:
+        if callable(vn):
+            vn = vn()
+        if vn.space is self.unique_space:
+
+            def set_unique(v: ir.Value):
+                unique[vn.offset : vn.offset + vn.size] = v
+
+            return set_unique
+        elif vn.space is self.const_space:
+            raise ValueError("setting const?")
+        elif vn.space is self.register_space:
+            rname = vn.get_register_name()
+            ridx = self.reg_idx(rname)
+
+            def set_register(v: ir.Value):
+                gep = self.bld.gep(
+                    self.regs_gv, [0, ridx], inbounds=True, name=f"set_{rname}_gep"
+                )
+                self.regs_gv
+
+            return set_register
+        elif vn.space is self.ram_space:
+            raise NotImplementedError(str(vn))
+
+            def set_ram(v: Int):
+                if not isinstance(v, self.int_t):
+                    v = self.int_t(v, vn.size)
+                else:
+                    assert v.size == vn.size
+                self.ram[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
+                    vn.size, vn.space.endianness
+                )
+
+            return set_ram
+        else:
+            raise NotImplementedError(vn.space.name)
+
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
         untrans_panic_t.args[0].name = "addr"
@@ -187,14 +284,14 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_untrans_panic_func(self, addr: int) -> ir.Function:
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
-        bld = ir.IRBuilder(bb)
-        call = bld.call(self.untrans_panic, [self.iptr(addr)])
-        call.tail = True
-        bld.ret_void()
+        with self.bld.goto_block(bb):
+            call = self.bld.call(self.untrans_panic, [self.iptr(addr)])
+            call.tail = True
+            self.bld.ret_void()
         return f
 
-    def gen_nop(self, bld: ir.IRBuilder) -> ir.Instruction:
-        return bld.call(self.intrinsics.nop, [])
+    def gen_nop(self) -> ir.Instruction:
+        return self.bld.call(self.intrinsics.nop, [])
 
     def gen_bswap_decls(self):
         bs16 = self.m.declare_intrinsic("llvm.bswap.i16", fnty=Intrinsics.bswap16_t)
@@ -202,9 +299,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         bs64 = self.m.declare_intrinsic("llvm.bswap.i64", fnty=Intrinsics.bswap64_t)
         return bs16, bs32, bs64
 
-    def gen_bswap(self, val: ir.Value, bld: ir.IRBuilder) -> ir.Instruction:
+    def gen_bswap(self, val: ir.Value) -> ir.Value:
+        if self.bitness == self.host_bitness:
+            return val
         name = f"{val.name}.bswap" if isinstance(val, ir.NamedValue) else "bswap"
-        return bld.call(self.intrinsics.bswap(type(val)), [val], name=name)
+        return self.bld.call(self.intrinsics.bswap(type(val)), [val], name=name)
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
@@ -225,20 +324,23 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_bb_func(self, addr: int) -> Optional[ir.Function]:
         try:
             instrs = self.translate(addr)
-        except RuntimeError:
+        except RuntimeError as e:
             return None
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bbs: dict[int, ir.Block] = {}
-        prev_bld = None
+        prev_bb = None
         for instr in instrs:
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
-            bld = ir.IRBuilder(bb)
-            if prev_bld:
-                prev_bld.branch(bb)
-            self.gen_nop(bld)
-            prev_bld = bld
+            self.bld.position_at_end(bb)
+            pcg = self.getter_for_varnode(self.reg_vn("pc"), UniqueBuf())
+            pcg()
+            if prev_bb:
+                with self.bld.goto_block(prev_bb):
+                    self.bld.branch(bb)
+            self.gen_nop()
+            prev_bb = bb
             bbs[instr.address.offset] = bb
-        bld.ret_void()
+        self.bld.ret_void()
         return f
 
     def lift(self):
@@ -257,13 +359,13 @@ class LLVMELFLifter(ELFPCodeEmu):
         func = ir.Function(self.m, fnty, name="fpadd")
 
         # Now implement the function
-        block = func.append_basic_block(name="entry")
-        builder = ir.IRBuilder(block)
+        bb = func.append_basic_block(name="entry")
         a, b = func.args
         a.name = "a"
         b.name = "b"
-        result = builder.fadd(a, b, name="res")
-        builder.ret(result)
+        self.bld.position_at_end(bb)
+        result = self.bld.fadd(a, b, name="res")
+        self.bld.ret(result)
 
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))

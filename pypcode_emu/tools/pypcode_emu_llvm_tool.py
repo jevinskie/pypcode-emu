@@ -6,6 +6,12 @@ from pypcode_emu.llvm import LLVMELFLifter
 def real_main(args):
     lifter = LLVMELFLifter(args.elf, args.exe, args.entry)
     lifter.lift()
+    # try:
+    #     lifter.lift()
+    # except Exception as e:
+    #     print("IR Module:")
+    #     print(str(lifter.m))
+    #     print(f"lifting error: {e}")
 
 
 def main() -> int:

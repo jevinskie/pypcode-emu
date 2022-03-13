@@ -47,6 +47,8 @@ def gen_cmd(bin_name: str) -> Callable:
 
 
 class UniqueBiDict(bidict):
+    """bidict with additional requirement that keys must be disjoint from items"""
+
     def __getitem__(self, item):
         a = self._fwdm.get(item, None)
         b = self._invm.get(item, None)

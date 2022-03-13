@@ -128,17 +128,19 @@ class PCodeEmu:
         self.register_space = self.ctx.spaces["register"]
         self.const_space = self.ctx.spaces["const"]
         self.bb_cache = {}
-        reg_names = self.ctx.get_register_names()
+        self.reg_names = self.ctx.get_register_names()
+        self.reg_vns = [self.ctx.get_register(rn) for rn in self.reg_names]
 
         class Regs:
             pass
 
         self.regs = Regs()
-        for reg_name in reg_names:
+        self.gen_reg_state()
+        for reg_name in self.reg_names:
             setattr(Regs, reg_name, self.get_register_prop(reg_name))
         for real_reg_name, alias_reg_name in self.reg_aliases.items():
             setattr(Regs, alias_reg_name, getattr(Regs, real_reg_name))
-        self.initialize_emu_state()
+        self.init_reg_state()
         self.last_csmith_checksum = None
 
     @property
@@ -148,15 +150,40 @@ class PCodeEmu:
                 "r1": "sp",
                 "r15": "lr",
                 "r5": "arg0",
+                "r6": "arg1",
+                "r7": "arg2",
+                "r8": "arg3",
+                "r9": "arg4",
+                "r10": "arg5",
                 "r3": "ret",
+                "r4": "ret1",
                 "r12": "int_num",
             }
         )
 
     def unalias_reg(self, reg_name: str) -> str:
+        if reg_name in self.reg_names:
+            return reg_name
         return self.reg_aliases[reg_name]
 
-    def initialize_emu_state(self):
+    def alias_reg(self, reg_name: str) -> str:
+        if reg_name in self.reg_aliases.keys():
+            return self.reg_aliases[reg_name]
+        if reg_name not in self.reg_names:
+            raise KeyError(reg_name)
+        return reg_name
+
+    def reg_idx(self, reg_name: str) -> int:
+        reg_name = self.unalias_reg(reg_name)
+        return self.reg_names.index(reg_name)
+
+    def reg_vn(self, reg_name: str) -> Varnode:
+        return self.reg_vns[self.reg_idx(reg_name)]
+
+    def gen_reg_state(self):
+        pass
+
+    def init_reg_state(self):
         self.regs.pc = self.int_t(self.entry, self.byteness)
         self.regs.sp = self.int_t(self.initial_sp, self.byteness)
         self.regs.lr = self.int_t(self.ret_addr - 8, self.byteness)
