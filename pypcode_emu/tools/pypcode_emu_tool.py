@@ -6,9 +6,11 @@ from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
 
 def real_main(args):
     try:
-        emu = ELFPCodeEmu(args.binary, args.entry)
+        emu = ELFPCodeEmu(args.binary, args.entry, arg0=args.arg0)
     except BinaryError:
-        emu = PCodeEmu(args.spec, args.binary, args.base, int(args.entry, 0))
+        emu = PCodeEmu(
+            args.spec, args.binary, args.base, int(args.entry, 0), arg0=args.arg0
+        )
     instr = emu.translate(
         emu.entry,
         max_inst=args.max_inst,
@@ -22,6 +24,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="pypcode-emu")
     parser.add_argument("binary", help="Input binary file (binary/ELF)", metavar="BIN")
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
+    parser.add_argument(
+        "-a", "--arg0", help="arg0", default=0, type=lambda s: int(s, 0), metavar="ARG0"
+    )
     parser.add_argument("-s", "--spec", help="Specification", metavar="SPEC")
     parser.add_argument(
         "-m",

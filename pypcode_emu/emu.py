@@ -26,8 +26,8 @@ real_print = print
 null_print = lambda *args, **kwargs: None
 # print = lambda *args, **kwargs: real_print(*args, file=sys.stderr, **kwargs)
 
-dprint = null_print
-# dprint = real_print
+# dprint = null_print
+dprint = real_print
 iprint = real_print
 eprint = real_print
 
@@ -73,23 +73,25 @@ class UniqueBuf(dict):
         super().__setitem__((byte_off, num_bytes), value)
 
 
-class Int(int):
-    addr: int
+class BinaryOpMagic(type):
+    pass
+
+
+class Int(int, metaclass=BinaryOpMagic):
     size: int
 
-    def __new__(cls, value: int, addr: int, size: int):
+    def __new__(cls, value: int, size: int):
         res = int.__new__(cls, value)
-        res.addr = addr
         res.size = size
         return res
 
-    def sext(self, size: Optional[int] = None) -> int:
+    def sext(self, size: Optional[int] = None) -> Int:
         if size is None:
             size = self.size
-        return sext(self, size)
+        return type(self)(sext(self, size), self.size)
 
-    def s2u(self) -> int:
-        return s2u(self, self.size)
+    def s2u(self) -> Int:
+        return type(self)(s2u(self, self.size), self.size)
 
 
 class PCodeEmu:
@@ -99,6 +101,8 @@ class PCodeEmu:
         entry: int = 0,
         initial_sp: int = 0x8000_0000,
         ret_addr: int = 0x7000_0000,
+        int_t: type = Int,
+        arg0: int = 0,
     ):
         arch, endianness, bitness, _ = spec.split(":")
         assert bitness == "32"
@@ -107,7 +111,10 @@ class PCodeEmu:
         self.entry = entry
         self.initial_sp = initial_sp
         self.ret_addr = ret_addr
+        self.int_t = int_t
+        self.arg0 = arg0
         self.bitness = int(bitness)
+        self.byteness = self.bitness // 8
         self.be = endianness == "BE"
         self.sla = untangle.parse(self.ctx.lang.slafile_path)
         self.ram = memoryview(mmap.mmap(-1, 0x1_0000_0000))
@@ -150,30 +157,21 @@ class PCodeEmu:
         return self.reg_aliases[reg_name]
 
     def initialize_emu_state(self):
-        self.regs.pc = self.entry
-        self.regs.sp = self.initial_sp
-        self.regs.lr = self.ret_addr - 8
+        self.regs.pc = self.int_t(self.entry, self.byteness)
+        self.regs.sp = self.int_t(self.initial_sp, self.byteness)
+        self.regs.lr = self.int_t(self.ret_addr - 8, self.byteness)
+        self.regs.arg0 = self.int_t(self.arg0, self.byteness)
 
-    def get_register_prop(self, name: str):
+    def get_register_prop(self, name: str) -> property:
         varnode = self.ctx.get_register(name)
-        bigendian = varnode.space.endianness == "big"
-        space_buf = self.space_bufs[varnode.space.name]
-        off = varnode.offset
-
-        struct_fmt = (">" if bigendian else "<") + {
-            1: "B",
-            2: "H",
-            4: "I",
-            8: "Q",
-        }[varnode.size]
-        unpack_from = struct.Struct(struct_fmt).unpack_from
-        pack_into = struct.Struct(struct_fmt).pack_into
+        getter_func = self.getter_for_varnode(varnode, UniqueBuf())
+        setter_func = self.setter_for_varnode(varnode, UniqueBuf())
 
         def getter(self) -> Int:
-            return Int(unpack_from(space_buf, off)[0], off, varnode.size)
+            return getter_func()
 
         def setter(self, val: Union[int, Int]) -> None:
-            pack_into(space_buf, off, val)
+            setter_func(val)
 
         return property(getter, setter)
 
@@ -276,53 +274,63 @@ class PCodeEmu:
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
-    def getter_for_varnode(self, vn: Union[Varnode, Callable], unique: UniqueBuf):
+    def getter_for_varnode(
+        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+    ) -> Callable[[], Int]:
         if callable(vn):
             vn = vn()
         if vn.space is self.unique_space:
 
-            def get_unique():
-                res = int.from_bytes(
-                    unique[vn.offset : vn.offset + vn.size], vn.space.endianness
+            def get_unique() -> Int:
+                return self.int_t(
+                    int.from_bytes(
+                        unique[vn.offset : vn.offset + vn.size], vn.space.endianness
+                    ),
+                    vn.size,
                 )
-                # dprint(f"{res:#010x} = {vn}")
-                return res
 
             return get_unique
         elif vn.space is self.const_space:
-            return lambda: vn.offset
+            return lambda: self.int_t(vn.offset, vn.size)
         elif vn.space is self.register_space:
 
-            def get_register():
-                res = int.from_bytes(
-                    self.register[vn.offset : vn.offset + vn.size], vn.space.endianness
+            def get_register() -> Int:
+                return self.int_t(
+                    int.from_bytes(
+                        self.register[vn.offset : vn.offset + vn.size],
+                        vn.space.endianness,
+                    ),
+                    vn.size,
                 )
-                # dprint(f"{res:#010x} = {vn.get_register_name()}")
-                return res
 
             return get_register
         elif vn.space is self.ram_space:
 
-            def get_ram():
-                res = int.from_bytes(
-                    self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
+            def get_ram() -> Int:
+                return self.int_t(
+                    int.from_bytes(
+                        self.ram[vn.offset : vn.offset + vn.size], vn.space.endianness
+                    ),
+                    vn.size,
                 )
-                # dprint(f"{res:#010x} = {vn}")
-                return res
 
             return get_ram
         else:
             raise NotImplementedError(vn.space.name)
 
-    def setter_for_varnode(self, vn: Union[Varnode, Callable], unique: UniqueBuf):
+    def setter_for_varnode(
+        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+    ) -> Callable[[Int], None]:
         if callable(vn):
             vn = vn()
         if vn.space is self.unique_space:
 
-            def set_unique(v: int):
-                v = s2u(v, vn.size)
-                # dprint(f"{vn} := {v:#010x}")
-                unique[vn.offset : vn.offset + vn.size] = v.to_bytes(
+            def set_unique(v: Int):
+                if not isinstance(v, self.int_t):
+                    v = self.int_t(v, vn.size)
+                else:
+                    assert v.size == vn.size
+                unique[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
                     vn.size, vn.space.endianness
                 )
 
@@ -331,19 +339,24 @@ class PCodeEmu:
             raise ValueError("setting const?")
         elif vn.space is self.register_space:
 
-            def set_register(v: int):
-                v = s2u(v, vn.size)
-                # dprint(f"{vn.get_register_name()} := {v:#010x}")
-                self.register[vn.offset : vn.offset + vn.size] = v.to_bytes(
+            def set_register(v: Int):
+                if not isinstance(v, self.int_t):
+                    v = self.int_t(v, vn.size)
+                else:
+                    assert v.size == vn.size
+                self.register[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
                     vn.size, vn.space.endianness
                 )
 
             return set_register
         elif vn.space is self.ram_space:
 
-            def set_ram(v: int):
-                v = s2u(v, vn.size)
-                self.ram[vn.offset : vn.offset + vn.size] = v.to_bytes(
+            def set_ram(v: Int):
+                if not isinstance(v, self.int_t):
+                    v = self.int_t(v, vn.size)
+                else:
+                    assert v.size == vn.size
+                self.ram[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
                     vn.size, vn.space.endianness
                 )
 
@@ -527,7 +540,9 @@ class ELFPCodeEmu(PCodeEmu):
     elf: ELF
     segments: [PhdrData]
 
-    def __init__(self, elf_path: str, entry: Optional[Union[str, int]] = None):
+    def __init__(
+        self, elf_path: str, entry: Optional[Union[str, int]] = None, arg0: int = 0
+    ):
         self.elf = ELF(elf_path)
         machine = {
             EM_MICROBLAZE: "mb",
@@ -550,7 +565,7 @@ class ELFPCodeEmu(PCodeEmu):
             except ValueError:
                 assert entry in self.elf.symbols
                 entry = self.elf.symbols[entry]
-        super().__init__(f"{machine}:{endianness}:{bitness}:default", entry)
+        super().__init__(f"{machine}:{endianness}:{bitness}:default", entry, arg0=arg0)
         self.segments = []
         for seg in self.elf.segments:
             if seg.type != PT.LOAD:
