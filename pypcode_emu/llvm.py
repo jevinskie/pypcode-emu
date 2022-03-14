@@ -39,8 +39,22 @@ def ibN(nbytes: int) -> ir.Type:
     return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
 
 
-class IntValBase:
+class IntVal(ObjectProxy):
     bld: ClassVar[ir.IRBuilder]
+
+    def __new__(cls, v):
+        if isinstance(v, cls):
+            return v
+        return super().__new__(cls)
+
+    def __init__(self, v):
+        if isinstance(v, type(self)):
+            return
+        super().__init__(v)
+
+    @classmethod
+    def class_with_builder(cls, builder: ir.IRBuilder) -> type:
+        return type("BoundIntVal", (IntVal,), {"bld": builder})
 
     @property
     def size(self):
@@ -55,22 +69,6 @@ class IntValBase:
     def s2u(self) -> IntVal:
         print(f"s2u: {self}")
         return self
-
-
-class IntVal(ObjectProxy, IntValBase):
-    def __new__(cls, wrapped):
-        if isinstance(wrapped, IntValBase):
-            return wrapped
-        return super().__new__(cls)
-
-    def __init__(self, wrapped):
-        if isinstance(wrapped, IntValBase):
-            return
-        super().__init__(wrapped)
-
-    @classmethod
-    def class_with_builder(cls, builder: ir.IRBuilder) -> type:
-        return type("BoundIntVal", (IntVal,), {"bld": builder})
 
 
 class Intrinsics:

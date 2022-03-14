@@ -84,6 +84,9 @@ class Int(int):
     def sext(self, size: int) -> Int:
         return type(self)(sext(self, size), size)
 
+    def u2s(self):
+        return self.sext(self.size)
+
     def s2u(self) -> Int:
         return type(self)(s2u(self, self.size), self.size)
 
@@ -502,7 +505,7 @@ class PCodeEmu:
                     if not is_term:
                         old_pc = self.regs.pc
                         new_pc = s2u(
-                            old_pc.sext() + inst.length + inst.length_delay, old_pc.size
+                            old_pc.u2s() + inst.length + inst.length_delay, old_pc.size
                         )
                         # dprint(f"non-term jump from {old_pc:#010x} to {new_pc:#010x}")
                         self.regs.pc = new_pc
