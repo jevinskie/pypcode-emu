@@ -28,15 +28,18 @@ CXX = gen_cmd(os.getenv("CXX", "clang++"))
 LLVM_AS = gen_cmd(os.getenv("CXX", "llvm-as"))
 LLVM_DIS = gen_cmd(os.getenv("CXX", "llvm-dis"))
 
+i1 = ir.IntType(1)
 i8 = ir.IntType(8)
 i16 = ir.IntType(16)
 i32 = ir.IntType(32)
 i64 = ir.IntType(64)
 void = ir.VoidType()
 
+size2iN = {1: i8, 2: i16, 4: i32, 8: i64}
+
 
 def ibN(nbytes: int) -> ir.Type:
-    return {1: i8, 2: i16, 4: i32, 8: i64}[nbytes]
+    return size2iN[nbytes]
 
 
 class IntVal(ObjectProxy):
@@ -74,11 +77,21 @@ class IntVal(ObjectProxy):
         print(f"u2s: {self}")
         return self
 
+    def carry(self, other: IntVal) -> IntVal:
+        return self
+
+    def scarry(self, other: IntVal) -> IntVal:
+        return self
+
     def __and__(self, other: IntVal):
         return self.bld.and_(self, other)
 
     def __add__(self, other: IntVal):
         return self.bld.add(self, other)
+
+
+def ovf_fty(ity: ir.IntType):
+    return ir.FunctionType(ir.LiteralStructType([ity, i1]), [ity, ity])
 
 
 class Intrinsics:
@@ -88,8 +101,6 @@ class Intrinsics:
     bswap32_t = ir.FunctionType(i32, [i32])
     bswap64: ir.Function
     bswap64_t = ir.FunctionType(i64, [i64])
-    nop: ir.Function
-    nop_t = ir.FunctionType(void, [])
 
     def bswap(self, ty: type) -> ir.Function:
         return {
@@ -97,6 +108,14 @@ class Intrinsics:
             i32: self.bswap32,
             i64: self.bswap64,
         }[ty]
+
+    nop: ir.Function
+    nop_t = ir.FunctionType(void, [])
+
+    sadd_ovf_ty = {s: ovf_fty(t) for s, t in size2iN.items()}
+    sadd_ovf: dict[int, ir.Function]
+    uadd_ovf_ty = {s: ovf_fty(t) for s, t in size2iN.items()}
+    uadd_ovf: dict[int, ir.Function]
 
 
 class LLVMELFLifter(ELFPCodeEmu):

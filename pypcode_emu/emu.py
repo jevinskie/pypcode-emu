@@ -82,13 +82,24 @@ class Int(int):
         return res
 
     def sext(self, size: int) -> Int:
-        return type(self)(sext(self, size), size)
+        return type(self)(sext(self, self.size), size)
 
     def u2s(self):
         return self.sext(self.size)
 
     def s2u(self) -> Int:
         return type(self)(s2u(self, self.size), self.size)
+
+    def carry(self, other: Int) -> Int:
+        s = self + other
+        int_max = (1 << (self.size * 8)) - 1
+        return type(self)(s > int_max, 1)
+
+    def scarry(self, other: Int) -> Int:
+        s = self.u2s() + other.u2s()
+        int_min = -(1 << (self.size * 8 - 1))
+        int_max = (1 << (self.size * 8 - 1)) - 1
+        return type(self)(not int_min <= s <= int_max, 1)
 
 
 class PCodeEmu:
@@ -392,7 +403,7 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def emu_pcodeop(self, op: PcodeOp) -> tuple[Optional[int], bool]:
-        # dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
+        dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             op.d(sext(op.a(), op.aa.size))
@@ -401,6 +412,7 @@ class PCodeEmu:
         elif opc is OpCode.INT_CARRY:
             op.d(op.a() + op.b() >= (1 << (op.aa.size * 8)))
         elif opc is OpCode.INT_SCARRY:
+            op.d(op.a().scarry(op.b()))
             s = op.a().u2s() + op.b().u2s()
             # FIXME: make this work and also make a branchless bitmagic version
             op.d(
