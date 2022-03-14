@@ -401,7 +401,8 @@ class PCodeEmu:
         elif opc is OpCode.INT_CARRY:
             op.d(op.a() + op.b() >= (1 << (op.aa.size * 8)))
         elif opc is OpCode.INT_SCARRY:
-            s = sext(op.a(), op.aa.size) + sext(op.b(), op.ba.size)
+            s = op.a().u2s() + op.b().u2s()
+            # FIXME: make this work and also make a branchless bitmagic version
             op.d(
                 s >= (1 << (op.aa.size * 8 - 1))
                 if s > 0
@@ -431,7 +432,11 @@ class PCodeEmu:
         elif opc is OpCode.INT_OR:
             op.d(op.a() | op.b())
         elif opc is OpCode.INT_AND:
-            op.d(op.a() & op.b())
+            av = op.a()
+            bv = op.b()
+            dv = av & bv
+            op.d(dv)
+            # op.d(op.a() & op.b())
         elif opc is OpCode.INT_XOR:
             op.d(op.a() ^ op.b())
         elif opc is OpCode.COPY:

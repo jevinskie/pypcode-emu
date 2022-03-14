@@ -70,6 +70,16 @@ class IntVal(ObjectProxy):
         print(f"s2u: {self}")
         return self
 
+    def u2s(self) -> IntVal:
+        print(f"u2s: {self}")
+        return self
+
+    def __and__(self, other: IntVal):
+        return self.bld.and_(self, other)
+
+    def __add__(self, other: IntVal):
+        return self.bld.add(self, other)
+
 
 class Intrinsics:
     bswap16: ir.Function
@@ -249,7 +259,12 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return get_unique
         elif vn.space is self.const_space:
-            return lambda: ibN(vn.size)(vn.offset)
+            const_v = self.int_t(ibN(vn.size)(vn.offset))
+
+            def get_constant() -> IntVal:
+                return const_v
+
+            return get_constant
         elif vn.space is self.register_space:
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
@@ -381,14 +396,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.bld.position_at_end(bb)
             if prev_bb is None:
                 self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
-            pcg = self.getter_for_varnode(self.reg_vn("pc"), UniqueBuf())
-            arg0s = self.setter_for_varnode(self.reg_vn("arg0"), UniqueBuf())
-            arg0s(pcg())
-            p1000 = self.mem_vn(0x1000, 4)
-            p4000 = self.mem_vn(0x4000, 4)
-            g1000 = self.getter_for_varnode(p1000, UniqueBuf())
-            s4000 = self.setter_for_varnode(p4000, UniqueBuf())
-            s4000(g1000())
+
+            for op in instr.ops:
+                self.emu_pcodeop(op)
+
             if prev_bb:
                 with self.bld.goto_block(prev_bb):
                     self.bld.branch(bb)
