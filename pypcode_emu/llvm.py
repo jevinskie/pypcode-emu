@@ -102,6 +102,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     regs_gv: ir.GlobalVariable
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
+    mem_lv: ir.LoadInstr
     intrinsics: Intrinsics
     bld: ir.IRBuilder
 
@@ -205,6 +206,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         # FIXME rename this function
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
         self.mem_gv = ir.GlobalVariable(self.m, self.mem_t, "mem")
+        self.mem_lv = None
 
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
         if init is None:
@@ -260,9 +262,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         elif vn.space is self.ram_space:
 
             def get_ram() -> IntVal:
-                mem_ptr = self.bld.load(self.mem_gv, name="mem_ptr")
                 gep = self.bld.gep(
-                    mem_ptr,
+                    self.mem_lv,
                     [i64(0), i64(vn.offset)],
                     inbounds=True,
                     name="mem_load_gep",
@@ -306,9 +307,8 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             def set_ram(v: IntVal):
                 bswapped = self.gen_bswap(v)
-                mem_ptr = self.bld.load(self.mem_gv, name="mem_ptr")
                 gep = self.bld.gep(
-                    mem_ptr,
+                    self.mem_lv,
                     [i64(0), i64(vn.offset)],
                     inbounds=True,
                     name="mem_store_gep",
@@ -379,6 +379,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         for instr in instrs:
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             self.bld.position_at_end(bb)
+            if prev_bb is None:
+                self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
             pcg = self.getter_for_varnode(self.reg_vn("pc"), UniqueBuf())
             arg0s = self.setter_for_varnode(self.reg_vn("arg0"), UniqueBuf())
             arg0s(pcg())
