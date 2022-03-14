@@ -289,16 +289,25 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         def store_setter(v: IntVal):
             store_addr = store_addr_getter()
-            self.bld.store(v, store_addr)
+            store_ptr = self.bld.inttoptr(
+                store_addr, v.type.as_pointer(), name="store_ptr"
+            )
+            bswap_v = self.gen_bswap(v)
+            self.bld.store(bswap_v, store_ptr)
 
         return store_setter
 
     def getter_for_load(self, load_addr_getter, load_spacebuf, op, load_space):
         assert load_space is self.ram_space
+        load_ty = ibN(op.da.size)
 
         def load_getter() -> IntVal:
             load_addr = load_addr_getter()
-            return self.int_t(self.bld.load(load_addr, name="load"))
+            load_ptr = self.bld.inttoptr(
+                load_addr, load_ty.as_pointer(), name="load_ptr"
+            )
+            load_v = self.bld.load(load_ptr, name="load")
+            return self.int_t(self.gen_bswap(load_v))
 
         return load_getter
 
