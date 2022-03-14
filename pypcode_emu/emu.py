@@ -84,6 +84,9 @@ class Int(int):
     def sext(self, size: int) -> Int:
         return type(self)(sext(self, self.size), size)
 
+    def zext(self, size: int) -> Int:
+        return type(self)(self, size)
+
     def u2s(self):
         return self.sext(self.size)
 
@@ -100,6 +103,9 @@ class Int(int):
         int_min = -(1 << (self.size * 8 - 1))
         int_max = (1 << (self.size * 8 - 1)) - 1
         return type(self)(not int_min <= s <= int_max, 1)
+
+    def asr(self, nbits: Int) -> Int:
+        return type(self)(self.u2s() >> nbits)
 
 
 class PCodeEmu:
@@ -252,21 +258,8 @@ class PCodeEmu:
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
                     op.ba = op.inputs[0]
-                    # FIXME: need lambda?
                     store_addr_getter = self.getter_for_varnode(lambda: op.da, unique)
-
-                    def make_store_setter(
-                        store_addr_getter, store_spacebuf, op, store_space
-                    ):
-                        def store_setter(v: int):
-                            store_addr = store_addr_getter()
-                            store_spacebuf[
-                                store_addr : store_addr + op.aa.size
-                            ] = v.to_bytes(op.aa.size, store_space.endianness)
-
-                        return store_setter
-
-                    op.d = make_store_setter(
+                    op.d = self.setter_for_store(
                         store_addr_getter, store_spacebuf, op, store_space
                     )
                     op.a = self.getter_for_varnode(lambda: op.aa, unique)
@@ -278,24 +271,7 @@ class PCodeEmu:
                     op.ba = op.inputs[0]
                     load_spacebuf = self.space2buf(load_space)
                     load_addr_getter = self.getter_for_varnode(lambda: op.aa, unique)
-
-                    def make_load_getter(
-                        load_addr_getter, load_spacebuf, op, load_space
-                    ):
-                        def load_getter():
-                            load_addr = load_addr_getter()
-                            res = int.from_bytes(
-                                load_spacebuf[load_addr : load_addr + op.da.size],
-                                load_space.endianness,
-                            )
-                            # dprint(
-                            #     f"{res:#010x} = *{load_space.name}[{load_addr:#010x}]"
-                            # )
-                            return res
-
-                        return load_getter
-
-                    op.a = make_load_getter(
+                    op.a = self.getter_for_load(
                         load_addr_getter, load_spacebuf, op, load_space
                     )
                 else:
@@ -311,6 +287,26 @@ class PCodeEmu:
                         op.b = self.getter_for_varnode(op.ba, unique)
         self.bb_cache[addr] = res.instructions
         return res.instructions
+
+    def setter_for_store(self, store_addr_getter, store_spacebuf, op, store_space):
+        def store_setter(v: int):
+            store_addr = store_addr_getter()
+            store_spacebuf[store_addr : store_addr + op.aa.size] = v.to_bytes(
+                op.aa.size, store_space.endianness
+            )
+
+        return store_setter
+
+    def getter_for_load(load_addr_getter, load_spacebuf, op, load_space):
+        def load_getter():
+            load_addr = load_addr_getter()
+            res = int.from_bytes(
+                load_spacebuf[load_addr : load_addr + op.da.size],
+                load_space.endianness,
+            )
+            return res
+
+        return load_getter
 
     def getter_for_varnode(
         self, vn: Union[Varnode, Callable], unique: UniqueBuf
@@ -406,29 +402,25 @@ class PCodeEmu:
         dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
-            op.d(sext(op.a(), op.aa.size))
+            # FIXME: was: op.d(sext(op.a(), op.aa.size))
+            op.d(op.a().sext(op.da.size))
         elif opc is OpCode.INT_ZEXT:
-            op.d(op.a())
+            op.d(op.a().zext(op.da.size))
         elif opc is OpCode.INT_CARRY:
-            op.d(op.a() + op.b() >= (1 << (op.aa.size * 8)))
+            op.d(op.a().carry(op.b()))
         elif opc is OpCode.INT_SCARRY:
             op.d(op.a().scarry(op.b()))
-            s = op.a().u2s() + op.b().u2s()
-            # FIXME: make this work and also make a branchless bitmagic version
-            op.d(
-                s >= (1 << (op.aa.size * 8 - 1))
-                if s > 0
-                else s < -(1 << (op.aa.size * 8 - 1))
-            )
         elif opc is OpCode.INT_ADD:
-            op.d(op.a() + op.b() & ((1 << (op.da.size * 8)) - 1))
+            # FIXME: was: op.d(op.a() + op.b() & ((1 << (op.da.size * 8)) - 1))
+            op.d(op.a() + op.b())
         elif opc is OpCode.INT_MULT:
-            op.d(op.a() * op.b() & ((1 << (op.da.size * 8)) - 1))
+            # FIXME: was: op.d(op.a() * op.b() & ((1 << (op.da.size * 8)) - 1))
+            op.d(op.a() * op.b())
         elif opc is OpCode.STORE:
             op.d(op.a())
         elif opc is OpCode.LOAD:
-            v = op.a() & ((1 << (op.da.size * 8)) - 1)
-            op.d(v)
+            # FIXME: was: op.d(op.a() & ((1 << (op.da.size * 8)) - 1))
+            op.d(op.a())
         elif opc is OpCode.INT_EQUAL:
             op.d(op.a() == op.b())
         elif opc is OpCode.INT_NOTEQUAL:
@@ -438,17 +430,15 @@ class PCodeEmu:
         elif opc is OpCode.INT_RIGHT:
             op.d(op.a() >> op.b())
         elif opc is OpCode.INT_SRIGHT:
-            op.d(sext(op.a(), op.aa.size) >> op.b())
+            # FIXME: was: op.d(sext(op.a(), op.aa.size) >> op.b())
+            op.d(op.a().asr(op.b()))
         elif opc is OpCode.SUBPIECE:
-            op.d(subpiece(op.a(), op.b(), op.aa.size, op.da.size))
+            # FIXME: was: op.d(subpiece(op.a(), op.b(), op.aa.size, op.da.size))
+            op.d(op.a().subpiece(op.b(), op.da.size))
         elif opc is OpCode.INT_OR:
             op.d(op.a() | op.b())
         elif opc is OpCode.INT_AND:
-            av = op.a()
-            bv = op.b()
-            dv = av & bv
-            op.d(dv)
-            # op.d(op.a() & op.b())
+            op.d(op.a() & op.b())
         elif opc is OpCode.INT_XOR:
             op.d(op.a() ^ op.b())
         elif opc is OpCode.COPY:

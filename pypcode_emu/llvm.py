@@ -43,7 +43,7 @@ def ibN(nbytes: int) -> ir.Type:
 
 
 class IntVal(ObjectProxy):
-    bld: ClassVar[ir.IRBuilder]
+    ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
 
     def __new__(cls, v):
         if isinstance(v, cls):
@@ -56,19 +56,21 @@ class IntVal(ObjectProxy):
         super().__init__(v)
 
     @classmethod
-    def class_with_builder(cls, builder: ir.IRBuilder) -> type:
-        return type("BoundIntVal", (IntVal,), {"bld": builder})
+    def class_with_lifter(cls, lifter: LLVMELFLifter) -> type:
+        return type("BoundIntVal", (IntVal,), {"ctx": lifter})
 
     @property
     def size(self):
         print(f"size: {self}")
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
-    # these are dummy since, unlike python, everything is 2's compliment
-    def sext(self) -> IntVal:
-        print(f"sext: {self}")
-        return self
+    def sext(self, size: int) -> IntVal:
+        return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
+    def zext(self, size: int) -> IntVal:
+        return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
+
+    # these are dummy since, unlike python, everything is 2's compliment
     def s2u(self) -> IntVal:
         print(f"s2u: {self}")
         return self
@@ -78,29 +80,37 @@ class IntVal(ObjectProxy):
         return self
 
     def carry(self, other: IntVal) -> IntVal:
-        return self
+        ovf_struct = self.ctx.bld.call(
+            self.ctx.intrinsics.uadd_ovf[self.type], [self, other], name="uovf_s"
+        )
+        ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="uovf_bit")
+        return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"))
 
     def scarry(self, other: IntVal) -> IntVal:
-        return self
+        ovf_struct = self.ctx.bld.call(
+            self.ctx.intrinsics.sadd_ovf[self.type], [self, other], name="sovf_s"
+        )
+        ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="sovf_bit")
+        return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
 
-    def __and__(self, other: IntVal):
-        return self.bld.and_(self, other)
+    def asr(self, nbits: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.ashr(self, nbits, name="asr"))
 
-    def __add__(self, other: IntVal):
-        return self.bld.add(self, other)
+    def __and__(self, other: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.and_(self, other, name="and"))
 
+    def __add__(self, other: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.add(self, other, name="add"))
 
-def ovf_fty(ity: ir.IntType):
-    return ir.FunctionType(ir.LiteralStructType([ity, i1]), [ity, ity])
+    def __lshift__(self, other: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
+
+    def __or__(self, other: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.or_(self, other, name="or"))
 
 
 class Intrinsics:
-    bswap16: ir.Function
-    bswap16_t = ir.FunctionType(i16, [i16])
-    bswap32: ir.Function
-    bswap32_t = ir.FunctionType(i32, [i32])
-    bswap64: ir.Function
-    bswap64_t = ir.FunctionType(i64, [i64])
+    bswap_t = {ity: ir.FunctionType(ity, [ity]) for ity in (i16, i32, i64)}
     bswap: dict[type, ir.Function]
 
     nop: ir.Function
@@ -114,10 +124,11 @@ class Intrinsics:
     uadd_ovf: dict[type, ir.Function]
 
     def __init__(self, m: ir.Module):
-        self.bswap16 = m.declare_intrinsic("llvm.bswap.i16", fnty=self.bswap16_t)
-        self.bswap32 = m.declare_intrinsic("llvm.bswap.i32", fnty=self.bswap32_t)
-        self.bswap64 = m.declare_intrinsic("llvm.bswap.i64", fnty=self.bswap64_t)
-        self.bswap = {i16: self.bswap16, i32: self.bswap32, i64: self.bswap64}
+        self.bswap = {}
+        for ity in self.bswap_t.keys():
+            self.bswap[ity] = m.declare_intrinsic(
+                f"llvm.bswap.{ity}", fnty=self.bswap_t[ity]
+            )
 
         self.nop = m.declare_intrinsic("llvm.donothing", fnty=self.nop_t)
 
@@ -163,7 +174,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
-        int_t = IntVal.class_with_builder(self.bld)
+        int_t = IntVal.class_with_lifter(self)
         super().__init__(elf_path, entry=entry, int_t=int_t)
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
@@ -272,6 +283,24 @@ class LLVMELFLifter(ELFPCodeEmu):
             raise NotImplementedError(f'get_register_prop setter called with "{val}"')
 
         return property(getter, setter)
+
+    def setter_for_store(self, store_addr_getter, store_spacebuf, op, store_space):
+        assert store_space is self.ram_space
+
+        def store_setter(v: IntVal):
+            store_addr = store_addr_getter()
+            self.bld.store(v, store_addr)
+
+        return store_setter
+
+    def getter_for_load(self, load_addr_getter, load_spacebuf, op, load_space):
+        assert load_space is self.ram_space
+
+        def load_getter() -> IntVal:
+            load_addr = load_addr_getter()
+            return self.int_t(self.bld.load(load_addr, name="load"))
+
+        return load_getter
 
     def getter_for_varnode(
         self, vn: Union[Varnode, Callable], unique: UniqueBuf
@@ -385,7 +414,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         if self.bitness == self.host_bitness:
             return val
         name = f"{val.name}.bswap" if isinstance(val, ir.NamedValue) else "bswap"
-        return self.bld.call(self.intrinsics.bswap(val.type), [val], name=name)
+        return self.bld.call(self.intrinsics.bswap[val.type], [val], name=name)
 
     def gen_text_addrs(self):
         self.global_const("text_start", self.iptr, self.exec_start)
