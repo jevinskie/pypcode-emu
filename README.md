@@ -1,2 +1,2 @@
 # pypcode-emu
-Ghidra P-Code emulation in Python
+Ghidra P-Code emulation and static LLVM lifting in Python
