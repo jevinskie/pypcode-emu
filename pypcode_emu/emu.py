@@ -289,6 +289,8 @@ class PCodeEmu:
         return res.instructions
 
     def setter_for_store(self, store_addr_getter, store_spacebuf, op, store_space):
+        assert store_space is self.ram_space
+
         def store_setter(v: int):
             store_addr = store_addr_getter()
             store_spacebuf[store_addr : store_addr + op.aa.size] = v.to_bytes(
@@ -297,7 +299,9 @@ class PCodeEmu:
 
         return store_setter
 
-    def getter_for_load(load_addr_getter, load_spacebuf, op, load_space):
+    def getter_for_load(self, load_addr_getter, load_spacebuf, op, load_space):
+        assert load_space is self.ram_space
+
         def load_getter():
             load_addr = load_addr_getter()
             res = int.from_bytes(
@@ -447,21 +451,37 @@ class PCodeEmu:
             if op.b():
                 return op.a(), False
         elif opc is OpCode.BRANCHIND:
-            self.regs.pc = op.a()
+            self.handle_branchind(op)
             return None, True
         elif opc is OpCode.RETURN:
-            self.regs.pc = op.a()
+            self.handle_return(op)
             return None, True
         elif opc is OpCode.CALLIND:
-            self.regs.pc = op.a()
+            self.handle_callind(op)
             return None, True
         elif opc is OpCode.CALLOTHER:
-            assert op.a() == 0 and op.b() == 0x8
-            self.software_interrupt(self.regs.int_num)
+            self.handle_callother(op)
             return None, False
         else:
             raise NotImplementedError(str(op))
         return None, False
+
+    def handle_cbranch(self, op: PcodeOp):
+        # fuck i dunno
+        pass
+
+    def handle_branchind(self, op: PcodeOp):
+        self.regs.pc = op.a()
+
+    def handle_return(self, op: PcodeOp):
+        self.regs.pc = op.a()
+
+    def handle_callind(self, op: PcodeOp):
+        self.regs.pc = op.a()
+
+    def handle_callother(self, op: PcodeOp):
+        assert op.a() == 0 and op.b() == 0x8
+        self.software_interrupt(self.regs.int_num)
 
     def software_interrupt(self, int_num: int):
         iprint(f"got sw int: {int_num:#06x}", int_num)

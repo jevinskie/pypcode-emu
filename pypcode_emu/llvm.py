@@ -8,7 +8,7 @@ from typing import Callable, ClassVar, Optional, Union
 from icecream import ic
 from llvmlite import ir
 from path import Path
-from pypcode import Varnode
+from pypcode import PcodeOp, Varnode
 from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
@@ -401,6 +401,22 @@ class LLVMELFLifter(ELFPCodeEmu):
             return set_ram
         else:
             raise NotImplementedError(vn.space.name)
+
+    def handle_cbranch(self, op: PcodeOp):
+        # fuck i dunno
+        raise NotImplementedError
+
+    def handle_branchind(self, op: PcodeOp):
+        raise NotImplementedError
+
+    def handle_return(self, op: PcodeOp):
+        raise NotImplementedError
+
+    def handle_callind(self, op: PcodeOp):
+        raise NotImplementedError
+
+    def handle_callother(self, op: PcodeOp):
+        raise NotImplementedError
 
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
