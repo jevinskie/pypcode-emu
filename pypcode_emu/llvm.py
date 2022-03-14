@@ -101,21 +101,38 @@ class Intrinsics:
     bswap32_t = ir.FunctionType(i32, [i32])
     bswap64: ir.Function
     bswap64_t = ir.FunctionType(i64, [i64])
-
-    def bswap(self, ty: type) -> ir.Function:
-        return {
-            i16: self.bswap16,
-            i32: self.bswap32,
-            i64: self.bswap64,
-        }[ty]
+    bswap: dict[type, ir.Function]
 
     nop: ir.Function
     nop_t = ir.FunctionType(void, [])
 
-    sadd_ovf_ty = {s: ovf_fty(t) for s, t in size2iN.items()}
-    sadd_ovf: dict[int, ir.Function]
-    uadd_ovf_ty = {s: ovf_fty(t) for s, t in size2iN.items()}
-    uadd_ovf: dict[int, ir.Function]
+    add_ovf_t = {
+        ity: ir.FunctionType(ir.LiteralStructType([ity, i1]), [ity, ity])
+        for ity in (i16, i32, i64)
+    }
+    sadd_ovf: dict[type, ir.Function]
+    uadd_ovf: dict[type, ir.Function]
+
+    def __init__(self, m: ir.Module):
+        self.bswap16 = m.declare_intrinsic("llvm.bswap.i16", fnty=self.bswap16_t)
+        self.bswap32 = m.declare_intrinsic("llvm.bswap.i32", fnty=self.bswap32_t)
+        self.bswap64 = m.declare_intrinsic("llvm.bswap.i64", fnty=self.bswap64_t)
+        self.bswap = {i16: self.bswap16, i32: self.bswap32, i64: self.bswap64}
+
+        self.nop = m.declare_intrinsic("llvm.donothing", fnty=self.nop_t)
+
+        self.sadd_ovf = {}
+        self.uadd_ovf = {}
+        for ity in self.add_ovf_t.keys():
+            sadd_fname, uadd_fname = [
+                f"llvm.{s}add.with.overflow.{ity}" for s in ("s", "u")
+            ]
+            self.sadd_ovf[ity] = m.declare_intrinsic(
+                sadd_fname, fnty=self.add_ovf_t[ity]
+            )
+            self.uadd_ovf[ity] = m.declare_intrinsic(
+                uadd_fname, fnty=self.add_ovf_t[ity]
+            )
 
 
 class LLVMELFLifter(ELFPCodeEmu):
@@ -144,6 +161,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     ):
         self.exe_path = Path(exe_path)
         self.m = self.get_init_mod()
+        self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
         int_t = IntVal.class_with_builder(self.bld)
         super().__init__(elf_path, entry=entry, int_t=int_t)
@@ -174,17 +192,6 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         self.addr2bb = [None for _ in self.text_addrs]
         self.gen_text_addrs()
-
-        self.intrinsics = Intrinsics()
-        bs16, bs32, bs64 = self.gen_bswap_decls()
-        self.intrinsics.bswap16, self.intrinsics.bswap32, self.intrinsics.bswap64 = (
-            bs16,
-            bs32,
-            bs64,
-        )
-        self.intrinsics.nop = self.m.declare_intrinsic(
-            "llvm.donothing", fnty=Intrinsics.nop_t
-        )
 
     def init_reg_state(self):
         self.init_ir_regs(
@@ -373,12 +380,6 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_nop(self) -> ir.Instruction:
         return self.bld.call(self.intrinsics.nop, [])
-
-    def gen_bswap_decls(self):
-        bs16 = self.m.declare_intrinsic("llvm.bswap.i16", fnty=Intrinsics.bswap16_t)
-        bs32 = self.m.declare_intrinsic("llvm.bswap.i32", fnty=Intrinsics.bswap32_t)
-        bs64 = self.m.declare_intrinsic("llvm.bswap.i64", fnty=Intrinsics.bswap64_t)
-        return bs16, bs32, bs64
 
     def gen_bswap(self, val: ir.Value) -> ir.Value:
         if self.bitness == self.host_bitness:
