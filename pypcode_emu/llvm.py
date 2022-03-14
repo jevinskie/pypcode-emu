@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import math
 import os
 import platform
 from typing import Callable, ClassVar, Optional, Union
@@ -102,6 +103,9 @@ class IntVal(ObjectProxy):
     def __add__(self, other: IntVal) -> IntVal:
         return type(self)(self.ctx.bld.add(self, other, name="add"))
 
+    def __mul__(self, other: IntVal) -> IntVal:
+        return type(self)(self.ctx.bld.mul(self, other, name="mul"))
+
     def __lshift__(self, other: IntVal) -> IntVal:
         return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
 
@@ -160,6 +164,10 @@ class LLVMELFLifter(ELFPCodeEmu):
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
     mem_lv: ir.LoadInstr
+    addr2bb_t: ir.Type
+    addr2bb_gv: ir.GlobalVariable
+    text_start_gv: ir.GlobalVariable
+    bb_caller: ir.Function
     intrinsics: Intrinsics
     bld: ir.IRBuilder
 
@@ -170,16 +178,19 @@ class LLVMELFLifter(ELFPCodeEmu):
         entry: Optional[Union[str, int]] = None,
         instr_len: int = 4,
     ):
+        self.instr_len = instr_len
+        assert self.instr_len == 4
+
         self.exe_path = Path(exe_path)
+        self.exec_start = 0x1_0000_0000
+        self.exec_end = 0x0000_0000
+
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
         int_t = IntVal.class_with_lifter(self)
+
         super().__init__(elf_path, entry=entry, int_t=int_t)
-        self.exec_start = 0x1_0000_0000
-        self.exec_end = 0x0000_0000
-        self.instr_len = instr_len
-        assert self.instr_len == 4
         num_exec_segs = 0
         for seg in self.elf.segments:
             if seg.type != PT.LOAD or seg.header.p_flags & PF.EXEC == 0:
@@ -190,6 +201,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             num_exec_segs += 1
         assert num_exec_segs == 1
         iprint(f"exec start: {self.exec_start:#010x} end: {self.exec_end:#010x}")
+        self.addr2bb = [None for _ in self.text_addrs]
 
         if self.bitness == 32:
             self.iptr = i32
@@ -198,11 +210,11 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.iptr = i64
             self.isz = i64
 
-        self.bb_t = ir.FunctionType(void, [])
         self.untrans_panic = self.gen_utrans_panic_decl()
 
-        self.addr2bb = [None for _ in self.text_addrs]
         self.gen_text_addrs()
+        self.gen_addr2bb()
+        self.bb_caller = self.gen_bb_caller()
 
     def init_reg_state(self):
         self.init_ir_regs(
@@ -254,6 +266,12 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
         self.mem_gv = ir.GlobalVariable(self.m, self.mem_t, "mem")
         self.mem_lv = None
+
+    def gen_addr2bb(self):
+        self.bb_t = ir.FunctionType(void, [])
+        self.addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
+        self.addr2bb_gv = ir.GlobalVariable(self.m, self.addr2bb_t, "addr2bb")
+        self.addr2bb_gv.global_constant = True
 
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
         if init is None:
@@ -407,16 +425,48 @@ class LLVMELFLifter(ELFPCodeEmu):
         raise NotImplementedError
 
     def handle_branchind(self, op: PcodeOp):
-        raise NotImplementedError
+        # raise NotImplementedError
+        self.gen_bb_caller_call(op.a())
 
     def handle_return(self, op: PcodeOp):
-        raise NotImplementedError
+        # raise NotImplementedError
+        self.gen_bb_caller_call(op.a())
 
     def handle_callind(self, op: PcodeOp):
-        raise NotImplementedError
+        # raise NotImplementedError
+        self.gen_bb_caller_call(op.a())
 
     def handle_callother(self, op: PcodeOp):
         raise NotImplementedError
+
+    def gen_bb_caller(self) -> ir.Function:
+        fty = ir.FunctionType(void, [self.iptr])
+        f = ir.Function(self.m, ftype=fty, name="bb_caller")
+        bb = f.append_basic_block("entry")
+        bb_addr = f.args[0]
+        bb_addr.name = "bb_addr"
+        self.bld.position_at_end(bb)
+        text_start = self.iptr(self.exec_start)
+        off_bytes = self.bld.sub(bb_addr, text_start, name="off_bytes")
+        nbits_shift = int(math.log2(self.instr_len))
+        assert math.log2(self.instr_len) == nbits_shift
+        off_iptrs = self.bld.lshr(
+            off_bytes, off_bytes.type(nbits_shift), name="off_iptrs"
+        )
+        bb_fptr_ptr = self.bld.gep(
+            self.addr2bb_gv,
+            [self.iptr(0), off_iptrs],
+            inbounds=True,
+            name="bb_fptr_ptr",
+        )
+        bb_fptr = self.bld.load(bb_fptr_ptr, name="bb_fptr")
+        call = self.bld.call(bb_fptr, [], tail=True, name="bb_caller")
+        self.bld.ret_void()
+        return f
+
+    def gen_bb_caller_call(self, bb_addr: IntVal):
+        call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
+        self.bld.ret_void()
 
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
@@ -426,10 +476,11 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_untrans_panic_func(self, addr: int) -> ir.Function:
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
         bb = f.append_basic_block("entry")
-        with self.bld.goto_block(bb):
-            call = self.bld.call(self.untrans_panic, [self.iptr(addr)])
-            call.tail = True
-            self.bld.ret_void()
+        self.bld.position_at_end(bb)
+        call = self.bld.call(
+            self.untrans_panic, [self.iptr(addr)], tail=True, name="untrans_panic"
+        )
+        self.bld.ret_void()
         return f
 
     def gen_nop(self) -> ir.Instruction:
@@ -442,20 +493,18 @@ class LLVMELFLifter(ELFPCodeEmu):
         return self.bld.call(self.intrinsics.bswap[val.type], [val], name=name)
 
     def gen_text_addrs(self):
-        self.global_const("text_start", self.iptr, self.exec_start)
+        self.text_start_gv = self.global_const("text_start", self.iptr, self.exec_start)
         self.global_const("text_end", self.iptr, self.exec_end)
         self.global_const("entry_point", self.iptr, self.entry)
 
-    def gen_addr2bb(self):
+    def init_addr2bb(self):
         for addr in self.text_addrs:
             idx = self.addr2bb_idx(addr)
             if self.addr2bb[idx] is None:
                 self.addr2bb[idx] = self.gen_untrans_panic_func(addr)
 
-        addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
-        addr2bb = ir.GlobalVariable(self.m, addr2bb_t, "addr2bb")
-        addr2bb.global_constant = True
-        addr2bb.initializer = ir.Constant(addr2bb_t, self.addr2bb)
+        self.addr2bb_gv.initializer = ir.Constant(self.addr2bb_t, self.addr2bb)
+        self.addr2bb_gv.linkage = "internal"
 
     def gen_bb_func(self, addr: int) -> Optional[ir.Function]:
         try:
@@ -463,9 +512,12 @@ class LLVMELFLifter(ELFPCodeEmu):
         except RuntimeError as e:
             return None
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
+        f.linkage = "internal"
+        f.calling_convention = "fastcc"
         bbs: dict[int, ir.Block] = {}
         prev_bb = None
         for instr in instrs:
+            self.dump(instr)
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             self.bld.position_at_end(bb)
             if prev_bb is None:
@@ -477,17 +529,17 @@ class LLVMELFLifter(ELFPCodeEmu):
             if prev_bb:
                 with self.bld.goto_block(prev_bb):
                     self.bld.branch(bb)
-            self.gen_nop()
+            # self.gen_nop()
             prev_bb = bb
             bbs[instr.address.offset] = bb
-        self.bld.ret_void()
+        # self.bld.ret_void()
         return f
 
     def lift(self):
         self.lift_demo()
         for addr in self.text_addrs:
             self.addr2bb[self.addr2bb_idx(addr)] = self.gen_bb_func(addr)
-        self.gen_addr2bb()
+        self.init_addr2bb()
         self.compile()
 
     def lift_demo(self):

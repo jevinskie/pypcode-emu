@@ -16,17 +16,13 @@ static void load_segs() {
     }
 }
 
-static constexpr size_t addr2bb_idx(uptr addr) {
-    return (addr - text_start) / bytes_per_instr;
-}
-
 void lifted_init() {
     load_segs();
 }
 
 void lifted_run() {
     fmt::print("lifted_run begin\n");
-    addr2bb[addr2bb_idx(entry_point)]();
+    bb_caller(entry_point);
     fmt::print("lifted_run end\n");
 }
 

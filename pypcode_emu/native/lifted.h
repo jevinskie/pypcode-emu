@@ -15,8 +15,6 @@ using sptr = s32;
 using usz  = uptr;
 using ssz  = sptr;
 
-using bb_t = void (*)(void);
-
 constexpr int bytes_per_instr = 4;
 
 #include "lifted-regs.h"
@@ -37,9 +35,8 @@ extern const u8 num_segs;
 extern const seg_t segs[];
 
 extern const uptr entry_point;
-extern const uptr text_start;
-extern const uptr text_end;
-extern const bb_t addr2bb[];
+
+void bb_caller(uptr addr);
 
 void untrans_panic(uptr pc);
 }
