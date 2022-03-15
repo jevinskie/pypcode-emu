@@ -174,6 +174,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     text_start_gv: ir.GlobalVariable
     bb_caller: ir.Function
     intrinsics: Intrinsics
+    instr_cb: ir.Function
+    op_cb: ir.Function
     bld: ir.IRBuilder
     bb_override: Optional[list[int]]
 
@@ -220,6 +222,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.isz = i64
 
         self.untrans_panic = self.gen_utrans_panic_decl()
+        self.instr_cb, self.op_cb = self.gen_cb_decls()
 
         self.gen_text_addrs()
         self.gen_addr2bb()
@@ -489,6 +492,21 @@ class LLVMELFLifter(ELFPCodeEmu):
         call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
         self.bld.ret_void()
 
+    def gen_instr_cb_call(self, pc: int):
+        self.bld.call(self.instr_cb, [self.iptr(pc)], name="inst_cb_call")
+
+    def gen_op_cb_call(self, pc: int, op_idx: int, opc: int):
+        self.bld.call(
+            self.op_cb, [self.iptr(pc), i32(op_idx), i32(opc)], name="op_cb_call"
+        )
+
+    def gen_cb_decls(self):
+        instr_cb_t = ir.FunctionType(void, [self.iptr])
+        instr_cb = ir.Function(self.m, instr_cb_t, "instr_cb")
+        op_cb_t = ir.FunctionType(void, [self.iptr, i32, i32])
+        op_cb = ir.Function(self.m, op_cb_t, "op_cb")
+        return instr_cb, op_cb
+
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
         untrans_panic_t.args[0].name = "addr"
@@ -541,13 +559,15 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.dump(instr)
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             self.bld.position_at_end(bb)
+            self.gen_instr_cb_call(instr.address.offset)
             if prev_bb is None:
                 self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
                 self.mem_base_lv = self.bld.ptrtoint(
                     self.mem_lv, i64, name="mem_base_int"
                 )
 
-            for op in instr.ops:
+            for i, op in enumerate(instr.ops):
+                self.gen_op_cb_call(instr.address.offset, i, op.opcode.value)
                 self.emu_pcodeop(op)
 
             if prev_bb:

@@ -38,6 +38,8 @@ extern const uptr entry_point;
 
 void bb_caller(uptr addr);
 
+void instr_cb(uptr pc);
+void op_cb(uptr pc, uint32_t op_idx, uint32_t opc);
 void untrans_panic(uptr pc);
 }
 

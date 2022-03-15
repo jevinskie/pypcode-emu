@@ -12,7 +12,9 @@ bb_addrs = [
     0x100000A0,
     0x100000C8,
     0x100000D8,
+    0x100000E4,
     0x100000EC,
+    0x100000F4,
 ]
 
 for bb_addr in bb_addrs:
