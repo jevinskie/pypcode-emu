@@ -114,12 +114,7 @@ class IntVal(ObjectProxy):
 
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
         bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
-        cur_bb = self.ctx.bld.basic_block
-        with self.ctx.bld.if_else(bool_v) as (then, otherwise):
-            with then:
-                true_bb = self.ctx.bld.basic_block
-            with otherwise:
-                false_bb = self.ctx.bld.basic_block
+        return self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
 
 
 class Intrinsics:
