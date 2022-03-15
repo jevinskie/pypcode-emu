@@ -4,7 +4,9 @@ from pypcode_emu.llvm import LLVMELFLifter
 
 
 def real_main(args):
-    lifter = LLVMELFLifter(args.elf, args.exe, args.entry)
+    lifter = LLVMELFLifter(
+        args.elf, args.exe, entry=args.entry, bb_override=args.bb_addr
+    )
     lifter.lift()
     # try:
     #     lifter.lift()
@@ -19,6 +21,14 @@ def main() -> int:
     parser.add_argument("elf", help="Input ELF file", metavar="ELF")
     parser.add_argument("exe", help="Output executable", metavar="EXE")
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
+    parser.add_argument(
+        "-b",
+        "--bb-addr",
+        help="Basic block address override",
+        type=lambda n: int(n, 0),
+        action="append",
+        metavar="BB",
+    )
     args = parser.parse_args()
     real_main(args)
     return 0

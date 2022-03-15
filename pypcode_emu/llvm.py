@@ -168,12 +168,14 @@ class LLVMELFLifter(ELFPCodeEmu):
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
     mem_lv: ir.LoadInstr
+    mem_base_lv: ir.CastInstr
     addr2bb_t: ir.Type
     addr2bb_gv: ir.GlobalVariable
     text_start_gv: ir.GlobalVariable
     bb_caller: ir.Function
     intrinsics: Intrinsics
     bld: ir.IRBuilder
+    bb_override: Optional[list[int]]
 
     def __init__(
         self,
@@ -181,6 +183,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         exe_path: str,
         entry: Optional[Union[str, int]] = None,
         instr_len: int = 4,
+        bb_override: Optional[list[int]] = None,
     ):
         self.instr_len = instr_len
         assert self.instr_len == 4
@@ -188,6 +191,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exe_path = Path(exe_path)
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
+
+        self.bb_override = bb_override
 
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
@@ -310,9 +315,15 @@ class LLVMELFLifter(ELFPCodeEmu):
         assert store_space is self.ram_space
 
         def store_setter(v: IntVal):
-            store_addr = store_addr_getter()
+            virt_store_addr = store_addr_getter()
+            virt_store_addr_i64 = self.bld.zext(
+                virt_store_addr, i64, "virt_store_addr_i64"
+            )
+            mapped_store_addr = self.bld.add(
+                self.mem_base_lv, virt_store_addr_i64, name="mapped_store_addr"
+            )
             store_ptr = self.bld.inttoptr(
-                store_addr, v.type.as_pointer(), name="store_ptr"
+                mapped_store_addr, v.type.as_pointer(), name="store_ptr"
             )
             bswap_v = self.gen_bswap(v)
             self.bld.store(bswap_v, store_ptr)
@@ -324,9 +335,15 @@ class LLVMELFLifter(ELFPCodeEmu):
         load_ty = ibN(op.da.size)
 
         def load_getter() -> IntVal:
-            load_addr = load_addr_getter()
+            virt_load_addr = load_addr_getter()
+            virt_load_addr_i64 = self.bld.zext(
+                virt_load_addr, i64, "virt_load_addr_i64"
+            )
+            mapped_load_addr = self.bld.add(
+                self.mem_base_lv, virt_load_addr_i64, name="mapped_load_addr"
+            )
             load_ptr = self.bld.inttoptr(
-                load_addr, load_ty.as_pointer(), name="load_ptr"
+                mapped_load_addr, load_ty.as_pointer(), name="load_ptr"
             )
             load_v = self.bld.load(load_ptr, name="load")
             return self.int_t(self.gen_bswap(load_v))
@@ -357,7 +374,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             def get_register() -> IntVal:
                 gep = self.regs_gv.gep([i32(0), i32(ridx)])
-                return self.int_t(self.bld.load(gep, name=rname))
+                return self.int_t(self.bld.load(gep, name=self.alias_reg(rname)))
 
             return get_register
         elif vn.space is self.ram_space:
@@ -526,6 +543,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.bld.position_at_end(bb)
             if prev_bb is None:
                 self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
+                self.mem_base_lv = self.bld.ptrtoint(
+                    self.mem_lv, i64, name="mem_base_int"
+                )
 
             for op in instr.ops:
                 self.emu_pcodeop(op)
@@ -541,7 +561,8 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def lift(self):
         self.lift_demo()
-        for addr in self.text_addrs:
+        addrs = self.text_addrs if self.bb_override is None else self.bb_override
+        for addr in addrs:
             self.addr2bb[self.addr2bb_idx(addr)] = self.gen_bb_func(addr)
         self.init_addr2bb()
         self.compile()

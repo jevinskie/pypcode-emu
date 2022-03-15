@@ -8,12 +8,12 @@ from pypcode_emu.emu import ELFPCodeEmu
 fact_elf_bin = Path(__file__).parent.parent / "fact"
 emu = ELFPCodeEmu(fact_elf_bin)
 
-bb_addrs = (
+bb_addrs = [
     0x100000A0,
     0x100000C8,
     0x100000D8,
     0x100000EC,
-)
+]
 
 for bb_addr in bb_addrs:
     for instr in emu.translate(bb_addr):
