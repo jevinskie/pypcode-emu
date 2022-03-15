@@ -112,6 +112,15 @@ class IntVal(ObjectProxy):
     def __or__(self, other: IntVal) -> IntVal:
         return type(self)(self.ctx.bld.or_(self, other, name="or"))
 
+    def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
+        bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
+        cur_bb = self.ctx.bld.basic_block
+        with self.ctx.bld.if_else(bool_v) as (then, otherwise):
+            with then:
+                true_bb = self.ctx.bld.basic_block
+            with otherwise:
+                false_bb = self.ctx.bld.basic_block
+
 
 class Intrinsics:
     bswap_t = {ity: ir.FunctionType(ity, [ity]) for ity in (i16, i32, i64)}

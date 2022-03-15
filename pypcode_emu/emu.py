@@ -107,6 +107,9 @@ class Int(int):
     def asr(self, nbits: Int) -> Int:
         return type(self)(self.u2s() >> nbits)
 
+    def cmov(self, true_val: Int, false_val: Int) -> Int:
+        return true_val if self else false_val
+
 
 class PCodeEmu:
     def __init__(
