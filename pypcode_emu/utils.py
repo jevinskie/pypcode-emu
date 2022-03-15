@@ -24,10 +24,10 @@ def first_where_attr_is(iterable, key, val, default=None):
     return first_where(iterable, lambda x: getattr(x, key) == val, default=default)
 
 
-def run_cmd(*args, log: bool = False):
+def run_cmd(*args, log: bool = True):
     args = (*args,)
     if log:
-        print(f"run_cmd args: {args}", file=sys.stderr)
+        print(f"run_cmd args: {' '.join(map(str, args))}", file=sys.stderr)
     r = subprocess.run(list(map(str, args)), capture_output=True)
     if r.returncode != 0:
         sys.stderr.buffer.write(r.stdout)

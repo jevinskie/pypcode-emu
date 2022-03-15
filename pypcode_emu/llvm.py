@@ -26,8 +26,9 @@ iprint = real_print
 eprint = real_print
 
 CXX = gen_cmd(os.getenv("CXX", "clang++"))
-LLVM_AS = gen_cmd(os.getenv("CXX", "llvm-as"))
-LLVM_DIS = gen_cmd(os.getenv("CXX", "llvm-dis"))
+LLVM_AS = gen_cmd(os.getenv("LLVM_AS", "llvm-as"))
+LLVM_DIS = gen_cmd(os.getenv("LLVM_DIS", "llvm-dis"))
+DEBUGIR = gen_cmd(os.getenv("DEBUGIR", "debugir"))
 
 i1 = ir.IntType(1)
 i8 = ir.IntType(8)
@@ -643,6 +644,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_bc_ll = build_dir / "lifted-bc.ll"
         lifted_bc_ll_orig = build_dir / "lifted-bc.orig.ll"
         self.write_ir(lifted_bc_ll_orig)
+        lifted_bc_dbg_ll = build_dir / "lifted-bc.orig.dbg.ll"
         lifted_bc_o = lifted_bc_ll + ".o"
         lifted_bc_s = lifted_bc_ll + ".s"
         lifted_bc_bc = lifted_bc_ll + ".bc"
@@ -678,9 +680,10 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_segs_o, lifted_segs_s)
 
+        DEBUGIR(lifted_bc_ll_orig)
         LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll_orig)
         LLVM_DIS("-o", lifted_bc_ll, lifted_bc_bc)
-        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_bc)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_dbg_ll)
         CXX(*CXXFLAGS, "-c", "-o", lifted_bc_s, "-S", lifted_bc_bc, "-g0")
         CXX(
             *CXXFLAGS,
