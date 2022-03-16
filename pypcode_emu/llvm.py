@@ -26,8 +26,6 @@ dprint = real_print
 iprint = real_print
 eprint = real_print
 
-isi = isinstance
-
 CXX = gen_cmd(os.getenv("CXX", "clang++"))
 LLVM_AS = gen_cmd(os.getenv("LLVM_AS", "llvm-as"))
 LLVM_DIS = gen_cmd(os.getenv("LLVM_DIS", "llvm-dis"))
@@ -65,17 +63,20 @@ class IntVal(ObjectProxy):
         return type("BoundIntVal", (IntVal,), {"ctx": lifter})
 
     @property
-    def size(self):
-        print(f"size: {self}")
+    def size(self) -> int:
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
+    @property
+    def is_const(self) -> bool:
+        return isinstance(self, Const)
+
     def sext(self, size: int) -> IntVal:
-        if isi(self, Const):
+        if self.is_const:
             return type(self)(super(Const, self).sext(ibN(size)))
         return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
     def zext(self, size: int) -> IntVal:
-        if isi(self, Const):
+        if self.is_const:
             return type(self)(super(Const, self).zext(ibN(size)))
         return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
 
@@ -103,32 +104,32 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
 
     def asr(self, nbits: IntVal) -> IntVal:
-        if isi(self, Const) and isi(nbits, Const):
+        if self.is_const and nbits.is_const:
             return type(self)(super(Const, self).ashr(nbits))
         return type(self)(self.ctx.bld.ashr(self, nbits, name="asr"))
 
     def __and__(self, other: IntVal) -> IntVal:
-        if isi(self, Const) and isi(other, Const):
+        if self.is_const and other.is_const:
             return type(self)(super(Const, self).and_(other))
         return type(self)(self.ctx.bld.and_(self, other, name="and"))
 
     def __add__(self, other: IntVal) -> IntVal:
-        if isi(self, Const) and isi(other, Const):
+        if self.is_const and other.is_const:
             return type(self)(super(Const, self).add(other))
         return type(self)(self.ctx.bld.add(self, other, name="add"))
 
     def __mul__(self, other: IntVal) -> IntVal:
-        if isi(self, Const) and isi(other, Const):
+        if self.is_const and other.is_const:
             return type(self)(super(Const, self).mul(other))
         return type(self)(self.ctx.bld.mul(self, other, name="mul"))
 
     def __lshift__(self, other: IntVal) -> IntVal:
-        if isi(self, Const) and isi(other, Const):
+        if self.is_const and other.is_const:
             return type(self)(super(Const, self).shl(other))
         return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
 
     def __or__(self, other: IntVal) -> IntVal:
-        if isi(self, Const) and isi(other, Const):
+        if self.is_const and other.is_const:
             return type(self)(super(Const, self).or_(other))
         return type(self)(self.ctx.bld.or_(self, other, name="or"))
 
@@ -509,7 +510,15 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
-        call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
+        if isinstance(bb_addr, Const):
+            call = self.bld.call(
+                self.addr2bb[int(bb_addr.constant)],
+                [],
+                tail=True,
+                name="bb_call_direct",
+            )
+        else:
+            call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
         self.bld.ret_void()
 
     def gen_instr_cb_call(self, pc: int):
