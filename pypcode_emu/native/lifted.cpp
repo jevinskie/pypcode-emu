@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 
 #include "lifted.h"
+#include "pcode-opcodes.h"
 
 u8 *mem;
 
@@ -36,5 +37,5 @@ void instr_cb(uptr pc) {
 }
 
 void op_cb(uptr pc, uint32_t op_idx, uint32_t opc) {
-    fmt::print("PC: {:#010x} op idx: {:2d} opc: {:3d}\n", pc, op_idx, opc);
+    fmt::print("PC: {:#010x} op idx: {:2d} opc: {:s}\n", pc, op_idx, opc2str[opc]);
 }
