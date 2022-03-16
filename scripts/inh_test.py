@@ -23,11 +23,8 @@ class Const:
     def __repr__(self) -> str:
         return f"Const({self.constant})"
 
-    def __int__(self) -> Optional[int]:
-        try:
-            return int(self.constant)
-        except ValueError:
-            return None
+    def __int__(self) -> int:
+        return int(self.constant)
 
 
 class VarVal:
@@ -47,25 +44,24 @@ class VarVal:
 
 
 class IntVal(ObjectProxy):
-    concrete: Optional[int]
-
-    # def __new__(cls, v):
-    #     if isinstance(v, cls):
-    #         return v
-    #     return super().__new__(cls)
+    _self_concrete: Optional[int]
 
     def __init__(self, v):
-        if isinstance(v, IntVal):
+        if isinstance(v, ObjectProxy):
             self = v
             return
         super().__init__(v)
         try:
-            self.concrete = int(v)
+            self._self_concrete = int(v)
         except (ValueError, TypeError):
-            self.concrete = None
+            self._self_concrete = None
 
     def __repr__(self) -> str:
         return f"IntVal({self})"
+
+    @property
+    def concrete(self) -> Optional[int]:
+        return self._self_concrete
 
     @property
     def is_const(self):
@@ -73,8 +69,7 @@ class IntVal(ObjectProxy):
 
     def __add__(self, other: IntVal):
         if self.is_const and other.is_const:
-            wtf = super(Const, self)
-            return type(self)(wtf.__add__(other))
+            return type(self)(self.__wrapped__ + other)
         return type(self)(f"{self} IV+ {other}")
 
 
@@ -110,5 +105,9 @@ ic(int(v1))
 ic(v1.is_const)
 v43 = v1 + v42
 ic(v43)
-ic(int(v43))
+try:
+    ic(int(v43))
+    assert False
+except ValueError:
+    pass
 ic(v43.is_const)
