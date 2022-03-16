@@ -15,13 +15,13 @@ class Const:
 
     def __add__(self, other: Const) -> Const:
         assert isinstance(other, Const)
-        return type(self)(f"{self} + {other}")
+        return type(self)(f"{self} C+ {other}")
 
     def __str__(self) -> str:
-        return self.constant
+        return f"C:{self.constant}"
 
     def __repr__(self) -> str:
-        return f"Const({self})"
+        return f"Const({self.constant})"
 
     def __int__(self) -> Optional[int]:
         try:
@@ -37,28 +37,32 @@ class VarVal:
         self.name = name
 
     def __str__(self) -> str:
-        return self.name
+        return f"V:{self.name}"
 
     def __repr__(self) -> str:
-        return f"VarVal({self})"
+        return f"VarVal({self.name})"
+
+    def __add__(self, other) -> VarVal:
+        return type(self)(f"{self} VV+ {other}")
 
 
 class IntVal(ObjectProxy):
     concrete: Optional[int]
 
-    def __new__(cls, v):
-        if isinstance(v, cls):
-            return v
-        return super().__new__(cls)
+    # def __new__(cls, v):
+    #     if isinstance(v, cls):
+    #         return v
+    #     return super().__new__(cls)
 
     def __init__(self, v):
-        if isinstance(v, type(self)):
+        if isinstance(v, IntVal):
+            self = v
             return
         super().__init__(v)
         try:
-            self.int_val = int(v)
-        except TypeError:
-            self.int_val = None
+            self.concrete = int(v)
+        except (ValueError, TypeError):
+            self.concrete = None
 
     def __repr__(self) -> str:
         return f"IntVal({self})"
@@ -68,7 +72,10 @@ class IntVal(ObjectProxy):
         return isinstance(self, Const)
 
     def __add__(self, other: IntVal):
-        return type(self)(super(Const, self).__add__(other))
+        if self.is_const and other.is_const:
+            wtf = super(Const, self)
+            return type(self)(wtf.__add__(other))
+        return type(self)(f"{self} IV+ {other}")
 
 
 c42 = Const(42)
@@ -89,6 +96,9 @@ try:
 except:
     pass
 
+vunk = va + c42
+ic(vunk)
+ic(vunk.is_const)
 
 v42 = IntVal(c42)
 ic(v42)
