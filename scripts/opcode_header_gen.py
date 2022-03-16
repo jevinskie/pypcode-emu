@@ -22,7 +22,7 @@ for opc_name, opc_idx in opcodes.items():
 p("};")
 p()
 p()
-p("const char *opc2str[] = {")
+p("static const char *opc2str[] = {")
 for i in range(max(opcodes.values()) + 1):
     if i in opcodes.values():
         p(f'    "{opcodes.inverse[i]}",')

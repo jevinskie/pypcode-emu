@@ -76,7 +76,7 @@ enum opc_t : uint8_t {
     POPCOUNT          = 72,
 };
 
-const char *opc2str[] = {
+static const char *opc2str[] = {
     nullptr,
     "COPY",
     "LOAD",
