@@ -8,6 +8,7 @@ from typing import Callable, ClassVar, Optional, Union
 
 from icecream import ic
 from llvmlite import ir
+from llvmlite.ir.values import Constant as Const
 from path import Path
 from pypcode import PcodeOp, Varnode
 from rich import inspect as rinspect
@@ -24,6 +25,8 @@ null_print = lambda *args, **kwargs: None
 dprint = real_print
 iprint = real_print
 eprint = real_print
+
+isi = isinstance
 
 CXX = gen_cmd(os.getenv("CXX", "clang++"))
 LLVM_AS = gen_cmd(os.getenv("LLVM_AS", "llvm-as"))
@@ -67,9 +70,13 @@ class IntVal(ObjectProxy):
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
     def sext(self, size: int) -> IntVal:
+        if isi(self, Const):
+            return type(self)(super(Const, self).sext(ibN(size)))
         return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
     def zext(self, size: int) -> IntVal:
+        if isi(self, Const):
+            return type(self)(super(Const, self).zext(ibN(size)))
         return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
 
     # these are dummy since, unlike python, everything is 2's compliment
@@ -96,21 +103,33 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
 
     def asr(self, nbits: IntVal) -> IntVal:
+        if isi(self, Const) and isi(nbits, Const):
+            return type(self)(super(Const, self).ashr(nbits))
         return type(self)(self.ctx.bld.ashr(self, nbits, name="asr"))
 
     def __and__(self, other: IntVal) -> IntVal:
+        if isi(self, Const) and isi(other, Const):
+            return type(self)(super(Const, self).and_(other))
         return type(self)(self.ctx.bld.and_(self, other, name="and"))
 
     def __add__(self, other: IntVal) -> IntVal:
+        if isi(self, Const) and isi(other, Const):
+            return type(self)(super(Const, self).add(other))
         return type(self)(self.ctx.bld.add(self, other, name="add"))
 
     def __mul__(self, other: IntVal) -> IntVal:
+        if isi(self, Const) and isi(other, Const):
+            return type(self)(super(Const, self).mul(other))
         return type(self)(self.ctx.bld.mul(self, other, name="mul"))
 
     def __lshift__(self, other: IntVal) -> IntVal:
+        if isi(self, Const) and isi(other, Const):
+            return type(self)(super(Const, self).shl(other))
         return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
 
     def __or__(self, other: IntVal) -> IntVal:
+        if isi(self, Const) and isi(other, Const):
+            return type(self)(super(Const, self).or_(other))
         return type(self)(self.ctx.bld.or_(self, other, name="or"))
 
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
@@ -515,6 +534,8 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_untrans_panic_func(self, addr: int) -> ir.Function:
         f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
+        f.linkage = "internal"
+        f.calling_convention = "fastcc"
         bb = f.append_basic_block("entry")
         self.bld.position_at_end(bb)
         call = self.bld.call(
