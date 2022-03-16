@@ -47,6 +47,7 @@ def ibN(nbytes: int) -> ir.Type:
 
 class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
+    _self_concrete: Optional[int]
 
     def __init__(self, v):
         if isinstance(v, IntVal) and isinstance(ObjectProxy):
