@@ -47,9 +47,8 @@ class IntVal(ObjectProxy):
     _self_concrete: Optional[int]
 
     def __init__(self, v):
-        if isinstance(v, ObjectProxy):
-            self = v
-            return
+        if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
+            v = v.__wrapped__
         super().__init__(v)
         try:
             self._self_concrete = int(v)
@@ -111,3 +110,7 @@ try:
 except ValueError:
     pass
 ic(v43.is_const)
+
+
+v42_2 = IntVal(v42)
+ic(v42_2)

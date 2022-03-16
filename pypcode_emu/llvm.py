@@ -48,14 +48,9 @@ def ibN(nbytes: int) -> ir.Type:
 class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
 
-    def __new__(cls, v):
-        if isinstance(v, cls):
-            return v
-        return super().__new__(cls)
-
     def __init__(self, v):
-        if isinstance(v, type(self)):
-            return
+        if isinstance(v, IntVal) and isinstance(ObjectProxy):
+            v = v.w
         super().__init__(v)
 
     @classmethod
@@ -63,21 +58,25 @@ class IntVal(ObjectProxy):
         return type("BoundIntVal", (IntVal,), {"ctx": lifter})
 
     @property
+    def w(self):
+        return self.__wrapped__
+
+    @property
     def size(self) -> int:
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
     @property
-    def is_const(self) -> bool:
-        return isinstance(self, Const)
+    def const(self) -> bool:
+        return isinstance(self, ir.Constant)
 
     def sext(self, size: int) -> IntVal:
-        if self.is_const:
-            return type(self)(super(Const, self).sext(ibN(size)))
+        # if self.const:
+        #     return type(self)(self.w.sext(ibN(size)))
         return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
     def zext(self, size: int) -> IntVal:
-        if self.is_const:
-            return type(self)(super(Const, self).zext(ibN(size)))
+        # if self.is_const:
+        #     return type(self)(super(Const, self).zext(ibN(size)))
         return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
 
     # these are dummy since, unlike python, everything is 2's compliment
@@ -104,33 +103,33 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
 
     def asr(self, nbits: IntVal) -> IntVal:
-        if self.is_const and nbits.is_const:
-            return type(self)(super(Const, self).ashr(nbits))
+        # if self.is_const and nbits.is_const:
+        #     return type(self)(super(Const, self).ashr(nbits))
         return type(self)(self.ctx.bld.ashr(self, nbits, name="asr"))
 
     def __and__(self, other: IntVal) -> IntVal:
-        if self.is_const and other.is_const:
-            return type(self)(super(Const, self).and_(other))
+        # if self.is_const and other.is_const:
+        #     return type(self)(super(Const, self).and_(other))
         return type(self)(self.ctx.bld.and_(self, other, name="and"))
 
     def __add__(self, other: IntVal) -> IntVal:
-        if self.is_const and other.is_const:
-            return type(self)(super(Const, self).add(other))
+        # if self.is_const and other.is_const:
+        #     return type(self)(super(Const, self).add(other))
         return type(self)(self.ctx.bld.add(self, other, name="add"))
 
     def __mul__(self, other: IntVal) -> IntVal:
-        if self.is_const and other.is_const:
-            return type(self)(super(Const, self).mul(other))
+        # if self.is_const and other.is_const:
+        #     return type(self)(super(Const, self).mul(other))
         return type(self)(self.ctx.bld.mul(self, other, name="mul"))
 
     def __lshift__(self, other: IntVal) -> IntVal:
-        if self.is_const and other.is_const:
-            return type(self)(super(Const, self).shl(other))
+        # if self.is_const and other.is_const:
+        #     return type(self)(super(Const, self).shl(other))
         return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
 
     def __or__(self, other: IntVal) -> IntVal:
-        if self.is_const and other.is_const:
-            return type(self)(super(Const, self).or_(other))
+        # if self.is_const and other.is_const:
+        #     return type(self)(super(Const, self).or_(other))
         return type(self)(self.ctx.bld.or_(self, other, name="or"))
 
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
