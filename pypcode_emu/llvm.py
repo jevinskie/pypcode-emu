@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import math
+import operator as opr
 import os
 import platform
 from typing import Callable, ClassVar, Optional, Union
@@ -9,7 +10,6 @@ from typing import Callable, ClassVar, Optional, Union
 from bidict import bidict
 from icecream import ic
 from llvmlite import ir
-from llvmlite.ir.values import Constant as Const
 from path import Path
 from pypcode import PcodeOp, Varnode
 from rich import inspect as rinspect
@@ -63,22 +63,17 @@ def ibN(nbytes: int) -> ir.Type:
 
 class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
-    _self_conc: Optional[int]
+    _self_conc: Optional[nint]
 
-    def __init__(self, v, concrete: Optional[Union[ir.Constant, int, nint]] = None):
+    def __init__(self, v, concrete: Optional[nint] = None):
         if isinstance(v, IntVal) and isinstance(ObjectProxy):
             v = v.w
         super().__init__(v)
-        if isinstance(concrete, ir.Constant):
+        if concrete is None and self.is_const:
             try:
-                concrete = int(concrete.constant)
+                concrete = uintN(self.size)(int(self.constant))
             except ValueError:
                 pass
-        if concrete is not None and not isinstance(concrete, nint):
-            if isinstance(concrete, ir.Constant):
-                concrete = int(concrete.constant)
-            assert isinstance(concrete, int)
-            concrete = uintN(self.size)(concrete)
         self._self_conc = concrete
 
     @classmethod
@@ -100,19 +95,25 @@ class IntVal(ObjectProxy):
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
     @property
-    def const(self) -> bool:
+    def is_const(self) -> bool:
         return isinstance(self, ir.Constant)
 
+    @property
+    def c(self) -> ir.Constant:
+        return super(ir.Constant, self)
+
     def sext(self, size: int) -> IntVal:
-        if self.const:
+        if self.is_const:
             val = self.w.sext(ibN(size))
             c = self.conc.sext(size * 8)
             return type(self)(val, concrete=c)
         return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
     def zext(self, size: int) -> IntVal:
-        # if self.is_const:
-        #     return type(self)(super(Const, self).zext(ibN(size)))
+        if self.is_const:
+            val = self.w.zext(ibN(size))
+            c = self.conc.zext(size * 8)
+            return type(self)(val, concrete=c)
         return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
 
     # these are dummy since, unlike python, everything is 2's compliment
@@ -124,7 +125,15 @@ class IntVal(ObjectProxy):
         print(f"u2s: {self}")
         return self
 
+    def bin_op(self, other: IntVal, op: Callable[[int, int], int]) -> IntVal:
+        if self.is_const and other.is_const:
+            val = self.w.sext(ibN(other))
+            c = self.conc.sext(size * 8)
+            return type(self)(val, concrete=c)
+        return type(self)(self.ctx.bld.sext(self, ibN(size), name=op.__name__))
+
     def carry(self, other: IntVal) -> IntVal:
+        # TODO: constexpr
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.uadd_ovf[self.type], [self, other], name="uovf_s"
         )
@@ -132,6 +141,7 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"))
 
     def scarry(self, other: IntVal) -> IntVal:
+        # TODO: constexpr
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.sadd_ovf[self.type], [self, other], name="sovf_s"
         )
@@ -545,7 +555,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
-        if isinstance(bb_addr, Const):
+        if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[int(bb_addr.constant)],
                 [],
@@ -708,6 +718,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         lifted_bc_ll = build_dir / "lifted-bc.ll"
         lifted_bc_ll_orig = build_dir / "lifted-bc.orig.ll"
+        lifted_bc_ll_orig_bak = lifted_bc_ll_orig + ".bak"
         self.write_ir(lifted_bc_ll_orig)
         lifted_bc_dbg_ll = build_dir / "lifted-bc.orig.dbg.ll"
         lifted_bc_o = lifted_bc_ll + ".o"
@@ -745,7 +756,9 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_segs_o, lifted_segs_s)
 
+        lifted_bc_ll_orig.copy(lifted_bc_ll_orig_bak)
         DEBUGIR(lifted_bc_ll_orig)
+        lifted_bc_ll_orig_bak.move(lifted_bc_ll_orig)
         LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll_orig)
         LLVM_DIS("-o", lifted_bc_ll, lifted_bc_bc)
         CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_dbg_ll)
@@ -760,7 +773,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             lifted_bc_bc,
             "-g0",
         )
-        os.remove(lifted_bc_bc)
+        lifted_bc_bc.remove()
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_o, lifted_cpp)
         CXX(*CXXFLAGS, "-c", "-o", lifted_s, "-S", lifted_cpp, "-g0")
