@@ -40,7 +40,7 @@ del as_s
 
 
 def sext(self: nint, nbits: int):
-    return nint(self.as_s, nbits, True)
+    return nint(self.as_s.v, nbits, True)
 
 
 nint.sext = sext
@@ -49,7 +49,7 @@ del sext
 
 
 def zext(self: nint, nbits: int):
-    return nint(self.as_u, nbits, False)
+    return nint(self.as_u.v, nbits, False)
 
 
 nint.zext = zext
@@ -58,7 +58,7 @@ del zext
 
 
 def asr(self: nint, nbits: int):
-    return nint(self.as_s >> nbits, self.b, True)
+    return nint((self.as_s >> nbits).v, self.b, True)
 
 
 nint.asr = asr
