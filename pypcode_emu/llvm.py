@@ -589,17 +589,13 @@ class LLVMELFLifter(ELFPCodeEmu):
         untrans_panic_t.args[0].name = "addr"
         return ir.Function(self.m, untrans_panic_t, "untrans_panic")
 
-    def gen_untrans_panic_func(self, addr: int) -> ir.Function:
-        f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
-        f.linkage = "internal"
-        f.calling_convention = "fastcc"
+    def gen_untrans_panic_call(self, addr: int, f: ir.Function):
         bb = f.append_basic_block("entry")
         self.bld.position_at_end(bb)
         call = self.bld.call(
             self.untrans_panic, [self.iptr(addr)], tail=True, name="untrans_panic"
         )
         self.bld.ret_void()
-        return f
 
     def gen_nop(self) -> ir.Instruction:
         return self.bld.call(self.intrinsics.nop, [])
@@ -624,14 +620,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.addr2bb_gv.initializer = ir.Constant(self.addr2bb_t, self.addr2bb)
         self.addr2bb_gv.linkage = "internal"
 
-    def gen_bb_func(self, addr: int) -> Optional[ir.Function]:
+    def gen_bb_func(self, addr: int, f: ir.Function) -> Optional[ir.Function]:
         try:
             instrs = self.translate(addr)
         except RuntimeError as e:
             return None
-        f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
-        f.linkage = "internal"
-        f.calling_convention = "fastcc"
         bbs: dict[int, ir.Block] = {}
         prev_bb = None
         for instr in instrs:
@@ -661,8 +654,21 @@ class LLVMELFLifter(ELFPCodeEmu):
     def lift(self):
         self.lift_demo()
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
+        for addr in self.text_addrs:
+            f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
+            f.linkage = "internal"
+            f.calling_convention = "fastcc"
+            self.addr2bb[self.addr2bb_idx(addr)] = f
+        translated_bbs = set()
         for addr in addrs:
-            self.addr2bb[self.addr2bb_idx(addr)] = self.gen_bb_func(addr)
+            bb_idx = self.addr2bb_idx(addr)
+            f = self.addr2bb[bb_idx]
+            lifted_f = self.gen_bb_func(addr, f)
+            if lifted_f:
+                translated_bbs.add(addr)
+        for addr in set(self.text_addrs) - translated_bbs:
+            bb_func = self.addr2bb[self.addr2bb_idx(addr)]
+            self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
         self.compile()
 
