@@ -6,6 +6,7 @@ import os
 import platform
 from typing import Callable, ClassVar, Optional, Union
 
+from bidict import bidict
 from icecream import ic
 from llvmlite import ir
 from llvmlite.ir.values import Constant as Const
@@ -16,6 +17,21 @@ from wrapt import ObjectProxy
 
 from .elf import PF, PT
 from .emu import ELFPCodeEmu, Int, UniqueBuf
+from .ntypes import (
+    int8,
+    int16,
+    int32,
+    int64,
+    intN,
+    nint,
+    size2intN,
+    size2uintN,
+    uint8,
+    uint16,
+    uint32,
+    uint64,
+    uintN,
+)
 from .utils import gen_cmd
 
 real_print = print
@@ -38,7 +54,7 @@ i32 = ir.IntType(32)
 i64 = ir.IntType(64)
 void = ir.VoidType()
 
-size2iN = {1: i8, 2: i16, 4: i32, 8: i64}
+size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
 
 
 def ibN(nbytes: int) -> ir.Type:
@@ -47,12 +63,23 @@ def ibN(nbytes: int) -> ir.Type:
 
 class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
-    _self_concrete: Optional[int]
+    _self_conc: Optional[int]
 
-    def __init__(self, v):
+    def __init__(self, v, concrete: Optional[Union[ir.Constant, int, nint]] = None):
         if isinstance(v, IntVal) and isinstance(ObjectProxy):
             v = v.w
         super().__init__(v)
+        if isinstance(concrete, ir.Constant):
+            try:
+                concrete = int(concrete.constant)
+            except ValueError:
+                pass
+        if concrete is not None and not isinstance(concrete, nint):
+            if isinstance(concrete, ir.Constant):
+                concrete = int(concrete.constant)
+            assert isinstance(concrete, int)
+            concrete = uintN(self.size)(concrete)
+        self._self_conc = concrete
 
     @classmethod
     def class_with_lifter(cls, lifter: LLVMELFLifter) -> type:
@@ -63,6 +90,12 @@ class IntVal(ObjectProxy):
         return self.__wrapped__
 
     @property
+    def conc(self) -> int:
+        if self._self_conc is None:
+            raise TypeError(f"{type(self)} is not concrete")
+        return self._self_conc
+
+    @property
     def size(self) -> int:
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
@@ -71,8 +104,10 @@ class IntVal(ObjectProxy):
         return isinstance(self, ir.Constant)
 
     def sext(self, size: int) -> IntVal:
-        # if self.const:
-        #     return type(self)(self.w.sext(ibN(size)))
+        if self.const:
+            val = self.w.sext(ibN(size))
+            c = self.conc.sext(size * 8)
+            return type(self)(val, concrete=c)
         return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
 
     def zext(self, size: int) -> IntVal:
