@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import math
+import operator
 import operator as opr
 import os
 import platform
@@ -125,12 +126,25 @@ class IntVal(ObjectProxy):
         print(f"u2s: {self}")
         return self
 
-    def bin_op(self, other: IntVal, op: Callable[[int, int], int]) -> IntVal:
+    def bin_op(
+        self,
+        other: IntVal,
+        op_name: str,
+        llvm_name: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> IntVal:
+        pretty_op_name = op_name.rstrip("_")
+        dunder_op_name = f"__{pretty_op_name}__"
         if self.is_const and other.is_const:
-            val = self.w.sext(ibN(other))
-            c = self.conc.sext(size * 8)
+            val_func = getattr(self.w, op_name)
+            val = val_func(other)
+            c_func = getattr(self.conc, dunder_op_name)
+            c = c_func(other.conc)
             return type(self)(val, concrete=c)
-        return type(self)(self.ctx.bld.sext(self, ibN(size), name=op.__name__))
+        llvm_name = llvm_name or pretty_op_name
+        op_bld_func = getattr(self.ctx.bld, llvm_name)
+        name = name or op_name
+        return type(self)(op_bld_func(self, other, name=name))
 
     def carry(self, other: IntVal) -> IntVal:
         # TODO: constexpr
@@ -149,36 +163,25 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
 
     def asr(self, nbits: IntVal) -> IntVal:
-        # if self.is_const and nbits.is_const:
-        #     return type(self)(super(Const, self).ashr(nbits))
-        return type(self)(self.ctx.bld.ashr(self, nbits, name="asr"))
+        return self.bin_op(nbits, "asr", llvm_name="ashr")
 
     def __and__(self, other: IntVal) -> IntVal:
-        # if self.is_const and other.is_const:
-        #     return type(self)(super(Const, self).and_(other))
-        return type(self)(self.ctx.bld.and_(self, other, name="and"))
+        return self.bin_op(other, "and_")
 
     def __add__(self, other: IntVal) -> IntVal:
-        # if self.is_const and other.is_const:
-        #     return type(self)(super(Const, self).add(other))
-        return type(self)(self.ctx.bld.add(self, other, name="add"))
+        return self.bin_op(other, "add")
 
     def __mul__(self, other: IntVal) -> IntVal:
-        # if self.is_const and other.is_const:
-        #     return type(self)(super(Const, self).mul(other))
-        return type(self)(self.ctx.bld.mul(self, other, name="mul"))
+        return self.bin_op(other, "mul")
 
     def __lshift__(self, other: IntVal) -> IntVal:
-        # if self.is_const and other.is_const:
-        #     return type(self)(super(Const, self).shl(other))
-        return type(self)(self.ctx.bld.shl(self, other, name="lsl"))
+        return self.bin_op(other, "lshift", llvm_name="shl", name="lsl")
 
     def __or__(self, other: IntVal) -> IntVal:
-        # if self.is_const and other.is_const:
-        #     return type(self)(super(Const, self).or_(other))
-        return type(self)(self.ctx.bld.or_(self, other, name="or"))
+        return self.bin_op(other, "or_")
 
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
+        # FIXME: constexpr
         bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
         return self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
 
@@ -557,7 +560,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_bb_caller_call(self, bb_addr: IntVal):
         if bb_addr.is_const:
             call = self.bld.call(
-                self.addr2bb[int(bb_addr.constant)],
+                self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
                 [],
                 tail=True,
                 name="bb_call_direct",

@@ -56,4 +56,14 @@ nint.zext = zext
 
 del zext
 
+
+def asr(self: nint, nbits: int):
+    return nint(self.as_s >> nbits, self.b, True)
+
+
+nint.asr = asr
+
+del asr
+
+
 del Type

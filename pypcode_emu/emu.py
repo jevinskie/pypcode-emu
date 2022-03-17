@@ -87,7 +87,7 @@ class Int(int):
     def zext(self, size: int) -> Int:
         return type(self)(self, size)
 
-    def u2s(self):
+    def u2s(self) -> Int:
         return self.sext(self.size)
 
     def s2u(self) -> Int:
