@@ -32,10 +32,11 @@ void untrans_panic(uptr pc) {
     exit(-1);
 }
 
-void instr_cb(uptr pc) {
-    fmt::print("PC: {:#010x}\n", pc);
+void instr_cb(uptr bb, uptr pc) {
+    fmt::print("BB: {:#010x} PC: {:#010x}\n", bb, pc);
 }
 
-void op_cb(uptr pc, uint32_t op_idx, uint32_t opc) {
-    fmt::print("PC: {:#010x} op idx: {:2d} opc: {:s}\n", pc, op_idx, opc2str[opc]);
+void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc) {
+    fmt::print("BB: {:#010x} PC: {:#010x} op idx: {:2d} opc: {:s} r5: {:#010x}\n", bb, pc, op_idx,
+               opc2str[opc], regs.r5);
 }

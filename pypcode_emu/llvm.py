@@ -569,18 +569,22 @@ class LLVMELFLifter(ELFPCodeEmu):
             call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
         self.bld.ret_void()
 
-    def gen_instr_cb_call(self, pc: int):
-        self.bld.call(self.instr_cb, [self.iptr(pc)], name="inst_cb_call")
-
-    def gen_op_cb_call(self, pc: int, op_idx: int, opc: int):
+    def gen_instr_cb_call(self, bb: int, pc: int):
         self.bld.call(
-            self.op_cb, [self.iptr(pc), i32(op_idx), i32(opc)], name="op_cb_call"
+            self.instr_cb, [self.iptr(bb), self.iptr(pc)], name="inst_cb_call"
+        )
+
+    def gen_op_cb_call(self, bb: int, pc: int, op_idx: int, opc: int):
+        self.bld.call(
+            self.op_cb,
+            [self.iptr(bb), self.iptr(pc), i32(op_idx), i32(opc)],
+            name="op_cb_call",
         )
 
     def gen_cb_decls(self):
-        instr_cb_t = ir.FunctionType(void, [self.iptr])
+        instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr])
         instr_cb = ir.Function(self.m, instr_cb_t, "instr_cb")
-        op_cb_t = ir.FunctionType(void, [self.iptr, i32, i32])
+        op_cb_t = ir.FunctionType(void, [self.iptr, self.iptr, i32, i32])
         op_cb = ir.Function(self.m, op_cb_t, "op_cb")
         return instr_cb, op_cb
 
@@ -612,11 +616,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.global_const("entry_point", self.iptr, self.entry)
 
     def init_addr2bb(self):
-        for addr in self.text_addrs:
-            idx = self.addr2bb_idx(addr)
-            if self.addr2bb[idx] is None:
-                self.addr2bb[idx] = self.gen_untrans_panic_func(addr)
-
         self.addr2bb_gv.initializer = ir.Constant(self.addr2bb_t, self.addr2bb)
         self.addr2bb_gv.linkage = "internal"
 
@@ -631,7 +630,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.dump(instr)
             bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
             self.bld.position_at_end(bb)
-            self.gen_instr_cb_call(instr.address.offset)
+            self.gen_instr_cb_call(addr, instr.address.offset)
             if prev_bb is None:
                 self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
                 self.mem_base_lv = self.bld.ptrtoint(
@@ -639,7 +638,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
 
             for i, op in enumerate(instr.ops):
-                self.gen_op_cb_call(instr.address.offset, i, op.opcode.value)
+                self.gen_op_cb_call(addr, instr.address.offset, i, op.opcode.value)
                 self.emu_pcodeop(op)
 
             if prev_bb:
