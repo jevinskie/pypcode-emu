@@ -452,8 +452,6 @@ class PCodeEmu:
             op.d(op.a())
         elif opc is OpCode.CBRANCH:
             return self.handle_cbranch(op)
-            if op.b():
-                return op.a(), False
         elif opc is OpCode.BRANCHIND:
             self.handle_branchind(op)
             return None, True

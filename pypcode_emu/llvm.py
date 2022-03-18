@@ -119,10 +119,12 @@ class IntVal(ObjectProxy):
 
     # these are dummy since, unlike python, everything is 2's compliment
     def s2u(self) -> IntVal:
+        raise NotImplementedError
         print(f"s2u: {self}")
         return self
 
     def u2s(self) -> IntVal:
+        raise NotImplementedError
         print(f"u2s: {self}")
         return self
 
@@ -146,8 +148,54 @@ class IntVal(ObjectProxy):
         name = name or op_name
         return type(self)(op_bld_func(self, other, name=name))
 
+    def bin_op(
+        self,
+        other: IntVal,
+        op_name: str,
+        llvm_name: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> IntVal:
+        pretty_op_name = op_name.rstrip("_")
+        dunder_op_name = f"__{pretty_op_name}__"
+        if self.is_const and other.is_const:
+            val_func = getattr(self.w, op_name)
+            val = val_func(other)
+            c_func = getattr(self.conc, dunder_op_name)
+            c = c_func(other.conc)
+            return type(self)(val, concrete=c)
+        llvm_name = llvm_name or pretty_op_name
+        op_bld_func = getattr(self.ctx.bld, llvm_name)
+        name = name or op_name
+        return type(self)(op_bld_func(self, other, name=name))
+
+    def cmp_op(
+        self,
+        other: IntVal,
+        op: str,
+        llvm_name: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> IntVal:
+        signed = op.startswith("s")
+        uop = op.lstrip("s")
+        dunder_op_name = f"__{op_name}__"
+        if self.is_const and other.is_const:
+            if signed:
+                val = self.w.icmp_signed(uop, other)
+            else:
+                val = self.w.icmp_unsigned(uop, other)
+            c = self.conc.cmp(op, other)
+            return type(self)(val, concrete=c)
+        llvm_name = llvm_name or pretty_op_name
+        op_bld_func = getattr(self.ctx.bld, llvm_name)
+        name = name or op_name
+        return type(self)(op_bld_func(self, other, name=name))
+
     def carry(self, other: IntVal) -> IntVal:
-        # TODO: constexpr
+        if self.is_const and other.is_const:
+            s = self.conc.as_u + other.conc.as_u
+            int_max = (1 << (self.size * 8)) - 1
+            val = 1 if s > int_max else 0
+            return type(self)(i1(val), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.uadd_ovf[self.type], [self, other], name="uovf_s"
         )
@@ -155,7 +203,12 @@ class IntVal(ObjectProxy):
         return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"))
 
     def scarry(self, other: IntVal) -> IntVal:
-        # TODO: constexpr
+        if self.is_const and other.is_const:
+            s = self.conc.as_s + other.conc.as_s
+            int_min = -(1 << (self.size * 8 - 1))
+            int_max = (1 << (self.size * 8 - 1)) - 1
+            val = 1 if not int_min <= s <= int_max else 0
+            return type(self)(i1(val), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.sadd_ovf[self.type], [self, other], name="sovf_s"
         )
@@ -184,6 +237,9 @@ class IntVal(ObjectProxy):
         # FIXME: constexpr
         bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
         return self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
+
+    def __eq__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, "eq")
 
 
 class Intrinsics:

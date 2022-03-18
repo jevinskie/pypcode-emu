@@ -1,3 +1,4 @@
+import operator
 from typing import Type
 
 from bidict import bidict
@@ -5,8 +6,6 @@ from nativetypes import *
 
 size2uintN = bidict({1: uint8, 2: uint16, 4: uint32, 8: uint64})
 size2intN = bidict({1: int8, 2: int16, 4: int32, 8: int64})
-
-del bidict
 
 
 def uintN(nbytes: int) -> nint:
@@ -24,7 +23,6 @@ def as_u(self: nint):
 
 
 nint.as_u = property(as_u)
-
 del as_u
 
 
@@ -35,7 +33,6 @@ def as_s(self: nint):
 
 
 nint.as_s = property(as_s)
-
 del as_s
 
 
@@ -44,7 +41,6 @@ def sext(self: nint, nbits: int):
 
 
 nint.sext = sext
-
 del sext
 
 
@@ -53,7 +49,6 @@ def zext(self: nint, nbits: int):
 
 
 nint.zext = zext
-
 del zext
 
 
@@ -62,8 +57,33 @@ def asr(self: nint, nbits: int):
 
 
 nint.asr = asr
-
 del asr
 
 
-del Type
+CMP_MAP = {
+    ">": "gt",
+    "<": "lt",
+    "==": "eq",
+    "!=": "ne",
+    ">=": "ge",
+    "<=": "le",
+}
+
+
+def cmp(self: nint, cmp: str, other: nint) -> uint8:
+    signed = cmp.startswith("s")
+    if signed:
+        a, b = self.as_s, other.as_s
+    else:
+        a, b = self.as_u, other.as_u
+    cmp = cmp.lstrip("s")
+    py_op_name = f"__{CMP_MAP[cmp]}__"
+    op_func = getattr(operator, py_op_name)
+    return uint8(1 if op_func(a, b) else 0)
+
+
+nint.CMP_MAP = CMP_MAP
+nint.cmp = cmp
+del CMP_MAP, cmp
+
+del Type, bidict, operator
