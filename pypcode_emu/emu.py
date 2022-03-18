@@ -451,6 +451,7 @@ class PCodeEmu:
         elif opc is OpCode.COPY:
             op.d(op.a())
         elif opc is OpCode.CBRANCH:
+            return self.handle_cbranch(op)
             if op.b():
                 return op.a(), False
         elif opc is OpCode.BRANCHIND:
@@ -470,8 +471,8 @@ class PCodeEmu:
         return None, False
 
     def handle_cbranch(self, op: PcodeOp):
-        # fuck i dunno
-        pass
+        if op.b():
+            return op.a(), False
 
     def handle_branchind(self, op: PcodeOp):
         self.regs.pc = op.a()

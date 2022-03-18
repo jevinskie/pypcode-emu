@@ -514,8 +514,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             raise NotImplementedError(vn.space.name)
 
     def handle_cbranch(self, op: PcodeOp):
-        # fuck i dunno
-        raise NotImplementedError
+        if op.b():
+            return op.a(), False
 
     def handle_branchind(self, op: PcodeOp):
         # raise NotImplementedError
@@ -624,30 +624,31 @@ class LLVMELFLifter(ELFPCodeEmu):
             instrs = self.translate(addr)
         except RuntimeError as e:
             return None
-        bbs: dict[int, ir.Block] = {}
-        prev_bb = None
-        for instr in instrs:
-            self.dump(instr)
-            bb = f.append_basic_block(f"pc_{instr.address.offset:#010x}")
-            self.bld.position_at_end(bb)
-            self.gen_instr_cb_call(addr, instr.address.offset)
-            if prev_bb is None:
-                self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
-                self.mem_base_lv = self.bld.ptrtoint(
-                    self.mem_lv, i64, name="mem_base_int"
-                )
+        bbs: dict[tuple[int, int], ir.Block] = {}
 
+        for instr in instrs:
+            inst_addr = instr.address.offset
+            for i in range(len(instr.ops)):
+                bb = f.append_basic_block(f"pc_{inst_addr:#010x}_{i}")
+                bbs[(inst_addr, i)] = bb
+
+        entry_bb = list(bbs.items())[0][1]
+        self.bld.position_at_end(entry_bb)
+        self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
+        self.mem_base_lv = self.bld.ptrtoint(self.mem_lv, i64, name="mem_base_int")
+
+        for instr in instrs:
+            inst_addr = instr.address.offset
+            self.dump(instr)
+
+            num_ops = len(instr.ops)
             for i, op in enumerate(instr.ops):
+                self.bld.position_at_end(bbs[(inst_addr, i)])
+                if i == 0:
+                    self.gen_instr_cb_call(addr, instr.address.offset)
                 self.gen_op_cb_call(addr, instr.address.offset, i, op.opcode.value)
                 self.emu_pcodeop(op)
 
-            if prev_bb:
-                with self.bld.goto_block(prev_bb):
-                    self.bld.branch(bb)
-            # self.gen_nop()
-            prev_bb = bb
-            bbs[instr.address.offset] = bb
-        # self.bld.ret_void()
         return f
 
     def lift(self):
