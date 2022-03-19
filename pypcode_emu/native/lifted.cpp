@@ -19,6 +19,7 @@ static void load_segs() {
 
 void lifted_init() {
     load_segs();
+    regs_init();
 }
 
 void lifted_run() {

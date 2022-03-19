@@ -468,15 +468,13 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_reg_state(self):
         struct_mem_types = []
-        struct_mem_vals = []
         for rname in self.ctx.get_register_names():
             reg = self.ctx.get_register(rname)
             struct_mem_types.append(ibN(reg.size))
-            struct_mem_vals.append(0)
 
         self.regs_t = self.m.context.get_identified_type("regs_t")
         self.regs_t.set_body(*struct_mem_types)
-        self.regs_gv = self.global_var("regs", self.regs_t, struct_mem_vals)
+        self.regs_gv = ir.GlobalVariable(self.m, self.regs_t, "regs")
 
         # FIXME rename this function
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
@@ -492,10 +490,14 @@ class LLVMELFLifter(ELFPCodeEmu):
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
         if init is None:
             init = {}
-        struct_mem_vals = []
+        f = ir.Function(self.m, ir.FunctionType(void, []), name="regs_init")
+        bb = f.append_basic_block(name="entry")
+        self.bld.position_at_end(bb)
         for rname in self.ctx.get_register_names():
-            struct_mem_vals.append(init.get(rname, 0))
-        self.regs_gv.initializer = self.regs_t(struct_mem_vals)
+            reg = self.ctx.get_register(rname)
+            setter = self.setter_for_varnode(reg, UniqueBuf())
+            setter(ibN(reg.size)(init.get(rname, 0)))
+        self.bld.ret_void()
 
     def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
         gv = ir.GlobalVariable(self.m, ty, name)
@@ -863,7 +865,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_lifted_regs_src(self, lifted_regs_cpp, lifted_regs_h):
         reg_names = self.ctx.get_register_names()
         # max_rname_len = max(map(len, reg_names))
-        max_rname_len = 5
+        max_name_len = 7
 
         with open(lifted_regs_h, "w") as f:
             p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
@@ -877,7 +879,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                 p(f"    u{reg.size * 8} {rname};")
             p("} regs_t;")
             p()
-            p("extern regs_t regs;")
+            p('extern "C" regs_t regs;')
+            p('extern "C" void regs_dump();')
+            p('extern "C" void regs_dump_alias();')
+            p('extern "C" void regs_init();')
             p()
 
         with open(lifted_regs_cpp, "w") as f:
@@ -885,21 +890,29 @@ class LLVMELFLifter(ELFPCodeEmu):
             p('#include "lifted-regs.h"')
             p()
             p("#include <fmt/format.h>")
+            p("#include <fmt/color.h>")
+            p("using namespace fmt;")
             p()
             p("regs_t regs;")
             p()
-            p("void regs_dump() {")
-            for rnames in chunked(reg_names, 4):
-                fmt_str = "    ".join(
-                    [
-                        f"{n:{max_rname_len}s}: {{:#0{self.ctx.get_register(n).size * 2 + 2}x}}"
+
+            def gen_reg_dump_func(func_name: str, alias_func=lambda n: n):
+                p(f"void {func_name}() {{")
+                for rnames in chunked(reg_names, 4):
+                    fmt_str = "    ".join(
+                        [f"{alias_func(n):{max_name_len}s}: {{}}" for n in rnames]
+                    )
+                    fmt_args = [
+                        f"format(fg(regs.{n} ? color::pale_green : color::slate_blue), "
+                        + f'"{{:#0{self.ctx.get_register(n).size * 2 + 2}x}}", regs.{n})'
                         for n in rnames
                     ]
-                )
-                fmt_args = ", ".join([f"regs.{n}" for n in rnames])
-                p(f'    fmt::print("{fmt_str}\\n", {fmt_args});')
-            p("}")
-            p()
+                    p(f'    print("{fmt_str}\\n", {", ".join(fmt_args)});')
+                p("}")
+                p()
+
+            gen_reg_dump_func("regs_dump")
+            gen_reg_dump_func("regs_dump_alias", alias_func=self.alias_reg)
 
     def compile(self, opt: str = "z", asan: bool = False):
         build_dir = Path("build")
