@@ -170,8 +170,9 @@ class IntVal(ObjectProxy):
 
     def cmp_op(
         self,
-        other: IntVal,
         op: str,
+        other: IntVal,
+        name: Optional[str] = None,
     ) -> IntVal:
         signed = op.startswith("s")
         signed_prefix = "s" if signed else ""
@@ -183,7 +184,8 @@ class IntVal(ObjectProxy):
                 val = self.w.icmp_unsigned(uop, other)
             c = self.conc.cmp(op, other)
             return type(self)(val, concrete=c)
-        val_name = f"{signed_prefix}{nint.CMP_MAP[uop]}"
+        name = f"_{name}" or ""
+        val_name = f"{signed_prefix}{nint.CMP_MAP[uop]}{name}"
         if signed:
             val = self.ctx.bld.icmp_signed(uop, self, other, name=val_name)
         else:
@@ -234,27 +236,33 @@ class IntVal(ObjectProxy):
         return self.bin_op(other, "or_")
 
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
-        # FIXME: constexpr
-        bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
-        return self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
+        if self.is_const:
+            if self.conc:
+                return true_val
+            else:
+                return false_val
+        bool_v = self.cmp_op("!=", type(self)(self.type(0)), name="cmov_cond")
+        return type(self)(
+            self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
+        )
 
     def __lt__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, "<")
+        return self.cmp_op("<", other)
 
     def __le__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, "<=")
+        return self.cmp_op("<=", other)
 
     def __eq__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, "==")
+        return self.cmp_op("==", other)
 
     def __ne__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, "!=")
+        return self.cmp_op("!=", other)
 
     def __ge__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, ">=")
+        return self.cmp_op(">=", other)
 
     def __gt__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, ">")
+        return self.cmp_op(">", other)
 
 
 class Intrinsics:
