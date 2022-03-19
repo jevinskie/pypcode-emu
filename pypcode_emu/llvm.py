@@ -371,6 +371,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     bb_override: Optional[list[int]]
     asan: bool
     opt_level: str
+    trace: bool
 
     def __init__(
         self,
@@ -381,6 +382,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_override: Optional[list[int]] = None,
         asan: bool = False,
         opt: str = "z",
+        trace: bool = False,
     ):
         self.instr_len = instr_len
         assert self.instr_len == 4
@@ -392,6 +394,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bb_override = bb_override
         self.asan = asan
         self.opt_level = opt
+        self.trace = trace
 
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
@@ -806,10 +809,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                 print(f"i: {i} order: {order} uniq: {op.seq.uniq}")
                 assert i == op.seq.uniq
                 self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
-                if i == 0:
-                    pass
-                    # self.gen_instr_cb_call(addr, inst_addr)
-                # self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
+                if self.trace:
+                    if i == 0:
+                        self.gen_instr_cb_call(addr, inst_addr)
+                    self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]

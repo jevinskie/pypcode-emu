@@ -11,6 +11,7 @@ def real_main(args):
         bb_override=args.bb_addr,
         asan=args.asan,
         opt=args.O,
+        trace=args.trace,
     )
     lifter.lift()
     # try:
@@ -26,6 +27,9 @@ def main() -> int:
     parser.add_argument("elf", help="Input ELF file", metavar="ELF")
     parser.add_argument("exe", help="Output executable", metavar="EXE")
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
+    parser.add_argument(
+        "-t", "--trace", default=False, help="Enable tracing", action="store_true"
+    )
     parser.add_argument("--asan", help="Enable address sanitizer", action="store_true")
     parser.add_argument(
         "-O", default="z", help="Optimization level", metavar="OPT_LEVEL"
