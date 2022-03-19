@@ -172,12 +172,10 @@ class IntVal(ObjectProxy):
         self,
         other: IntVal,
         op: str,
-        llvm_name: Optional[str] = None,
-        name: Optional[str] = None,
     ) -> IntVal:
         signed = op.startswith("s")
+        signed_prefix = "s" if signed else ""
         uop = op.lstrip("s")
-        dunder_op_name = f"__{op_name}__"
         if self.is_const and other.is_const:
             if signed:
                 val = self.w.icmp_signed(uop, other)
@@ -185,10 +183,12 @@ class IntVal(ObjectProxy):
                 val = self.w.icmp_unsigned(uop, other)
             c = self.conc.cmp(op, other)
             return type(self)(val, concrete=c)
-        llvm_name = llvm_name or pretty_op_name
-        op_bld_func = getattr(self.ctx.bld, llvm_name)
-        name = name or op_name
-        return type(self)(op_bld_func(self, other, name=name))
+        val_name = f"{signed_prefix}{nint.CMP_MAP[uop]}"
+        if signed:
+            val = self.ctx.bld.icmp_signed(uop, self, other, name=val_name)
+        else:
+            val = self.ctx.bld.icmp_unsigned(uop, self, other, name=val_name)
+        return type(self)(val)
 
     def carry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
@@ -238,8 +238,23 @@ class IntVal(ObjectProxy):
         bool_v = self.ctx.bld.icmp_unsigned("==", self, self.type(0), name="cmov_cond")
         return self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
 
+    def __lt__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, "<")
+
+    def __le__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, "<=")
+
     def __eq__(self, other: IntVal) -> IntVal:
-        return self.cmp_op(other, "eq")
+        return self.cmp_op(other, "==")
+
+    def __ne__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, "!=")
+
+    def __ge__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, ">=")
+
+    def __gt__(self, other: IntVal) -> IntVal:
+        return self.cmp_op(other, ">")
 
 
 class Intrinsics:
