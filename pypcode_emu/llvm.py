@@ -17,6 +17,7 @@ from wrapt import ObjectProxy
 
 from .elf import PF, PT
 from .emu import ELFPCodeEmu, UniqueBuf
+from .llvm_utils import CStringPool
 from .ntypes import (
     int8,
     int16,
@@ -371,6 +372,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     asan: bool
     opt_level: str
     trace: bool
+    strpool: CStringPool
 
     def __init__(
         self,
@@ -398,6 +400,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
+        self.strpool = CStringPool(self.m)
         self.bb_bbs = None
         int_t = IntVal.class_with_lifter(self)
 
@@ -486,6 +489,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
         self.addr2bb_gv = ir.GlobalVariable(self.m, self.addr2bb_t, "addr2bb")
         self.addr2bb_gv.global_constant = True
+        self.addr2bb_gv.linkage = "internal"
 
     def init_ir_regs(self, init: Optional[dict[str, int]] = None):
         if init is None:
@@ -769,7 +773,6 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def init_addr2bb(self):
         self.addr2bb_gv.initializer = ir.Constant(self.addr2bb_t, self.addr2bb)
-        self.addr2bb_gv.linkage = "internal"
 
     def gen_bb_func(self, addr: int, f: ir.Function) -> Optional[ir.Function]:
         try:
