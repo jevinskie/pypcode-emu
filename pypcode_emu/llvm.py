@@ -47,6 +47,7 @@ CXX = gen_cmd(os.getenv("CXX", "clang++"))
 LLVM_AS = gen_cmd(os.getenv("LLVM_AS", "llvm-as"))
 LLVM_DIS = gen_cmd(os.getenv("LLVM_DIS", "llvm-dis"))
 DEBUGIR = gen_cmd(os.getenv("DEBUGIR", "debugir"))
+OPT = gen_cmd(os.getenv("LLVM_OPT", "opt"))
 
 i1 = ir.IntType(1)
 i8 = ir.IntType(8)
@@ -368,6 +369,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     op_cb: ir.Function
     bld: ir.IRBuilder
     bb_override: Optional[list[int]]
+    asan: bool
+    opt_level: str
 
     def __init__(
         self,
@@ -376,6 +379,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         entry: Optional[Union[str, int]] = None,
         instr_len: int = 4,
         bb_override: Optional[list[int]] = None,
+        asan: bool = False,
+        opt: str = "z",
     ):
         self.instr_len = instr_len
         assert self.instr_len == 4
@@ -385,6 +390,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exec_end = 0x0000_0000
 
         self.bb_override = bb_override
+        self.asan = asan
+        self.opt_level = opt
 
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
@@ -451,7 +458,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def get_init_mod(self) -> ir.Module:
         m = ir.Module(name=self.exe_path.name + ".ll")
         triple = {
-            ("x86_64", "Linux", "glibc"): "x86_64-linux-gnu",
+            ("x86_64", "Linux", "glibc"): "x86_64-pc-linux-gnu",
         }.get((platform.machine(), platform.system(), platform.libc_ver()[0]))
         if triple:
             m.triple = triple
@@ -666,8 +673,8 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def handle_callind(self, op: PcodeOp):
         # FIXME: constexpr
-        self.gen_bb_caller_call(op.a())
-        return None, True
+        self.gen_bb_caller_call(op.a(), tail=False, ret=False)
+        return None, False
 
     def handle_callother(self, op: PcodeOp):
         raise NotImplementedError
@@ -697,7 +704,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.ret_void()
         return f
 
-    def gen_bb_caller_call(self, bb_addr: IntVal, tail=True):
+    def gen_bb_caller_call(self, bb_addr: IntVal, tail: bool = True, ret: bool = True):
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
@@ -707,7 +714,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             )
         else:
             call = self.bld.call(self.bb_caller, [bb_addr], tail=tail, name="bb_call")
-        self.bld.ret_void()
+        if ret:
+            self.bld.ret_void()
 
     def gen_instr_cb_call(self, bb: int, pc: int):
         self.bld.call(
@@ -828,7 +836,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             bb_func = self.addr2bb[self.addr2bb_idx(addr)]
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
-        self.compile()
+        self.compile(opt=self.opt_level, asan=self.asan)
 
     def lift_demo(self):
         # Create some useful types
@@ -863,7 +871,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             p("} regs_t;")
             p()
 
-    def compile(self):
+    def compile(self, opt: str = "z", asan: bool = False):
         build_dir = Path("build")
         try:
             os.mkdir(build_dir)
@@ -888,10 +896,12 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_bc_ll_orig_bak = lifted_bc_ll_orig + ".bak"
         self.write_ir(lifted_bc_ll_orig)
         lifted_bc_dbg_ll = build_dir / "lifted-bc.orig.dbg.ll"
+        lifted_bc_comp_ll = build_dir / "lifted-bc.comp.ll"
+        lifted_bc_comp_s = build_dir / "lifted-bc.comp.s"
         lifted_bc_o = lifted_bc_ll + ".o"
-        lifted_bc_s = lifted_bc_ll + ".s"
         lifted_bc_bc = lifted_bc_ll + ".bc"
         lifted_bc_opt_ll = lifted_bc_ll + ".opt.ll"
+        lifted_bc_opt_s = lifted_bc_ll + ".opt.s"
 
         lifted_cpp = importlib.resources.files(__package__) / "native" / "lifted.cpp"
         lifted_base = Path("build") / lifted_cpp.name
@@ -912,10 +922,16 @@ class LLVMELFLifter(ELFPCodeEmu):
             "-std=c++20",
             "-Wall",
             "-Wextra",
-            "-Oz",
+            f"-O{opt}",
         ]
         LDFLAGS = []
         LIBS = ["-lfmt"]
+
+        PRETTY_CXXFLAGS = [*CXXFLAGS, "-Oz", "-g0"]
+
+        if asan:
+            CXXFLAGS += ["-fsanitize=address"]
+            LDFLAGS += ["-fsanitize=address"]
 
         CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
         CXX(*CXXFLAGS, "-c", "-o", harness_s, "-S", harness_cpp, "-g0")
@@ -924,21 +940,38 @@ class LLVMELFLifter(ELFPCodeEmu):
         CXX(*CXXFLAGS, "-c", "-o", lifted_segs_o, lifted_segs_s)
 
         lifted_bc_ll_orig.copy(lifted_bc_ll_orig_bak)
+        # generate lifted_bc_dbg_ll, overwrites lifted_bc_ll_orig
         DEBUGIR(lifted_bc_ll_orig)
+        # restore lifted_bc_ll_orig
         lifted_bc_ll_orig_bak.move(lifted_bc_ll_orig)
+        # cleanup original asm
         LLVM_AS("-o", lifted_bc_bc, lifted_bc_ll_orig)
         LLVM_DIS("-o", lifted_bc_ll, lifted_bc_bc)
-        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_dbg_ll)
-        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_s, "-S", lifted_bc_bc, "-g0")
+
+        lifted_bc_to_compile = lifted_bc_dbg_ll
+
+        # compile debug IR
+        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_o, lifted_bc_to_compile)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_bc_comp_s, "-S", lifted_bc_to_compile, "-g0")
         CXX(
             *CXXFLAGS,
+            "-c",
+            "-o",
+            lifted_bc_comp_ll,
+            "-emit-llvm",
+            "-S",
+            lifted_bc_to_compile,
+            "-g0",
+        )
+        CXX(*PRETTY_CXXFLAGS, "-c", "-o", lifted_bc_opt_s, "-S", lifted_bc_bc)
+        CXX(
+            *PRETTY_CXXFLAGS,
             "-c",
             "-o",
             lifted_bc_opt_ll,
             "-emit-llvm",
             "-S",
             lifted_bc_bc,
-            "-g0",
         )
         lifted_bc_bc.remove()
 

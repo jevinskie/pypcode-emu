@@ -234,7 +234,8 @@ class PCodeEmu:
         addr: int,
         max_inst: int = 0,
         max_bytes: int = 0,
-        bb_terminating: bool = True,
+        bb_terminating: bool = False,
+        bb_nonlinear_terminating: bool = True,
     ) -> Sequence[Translation]:
         # dprint(f"translate {addr:#010x}")
         if addr in self.bb_cache:
@@ -245,6 +246,7 @@ class PCodeEmu:
             max_inst=max_inst,
             max_bytes=max_bytes,
             bb_terminating=bb_terminating,
+            bb_nonlinear_terminating=bb_nonlinear_terminating,
         )
         if res.error is not None:
             raise RuntimeError(res.error)
@@ -453,17 +455,13 @@ class PCodeEmu:
         elif opc is OpCode.CBRANCH:
             return self.handle_cbranch(op)
         elif opc is OpCode.BRANCHIND:
-            self.handle_branchind(op)
-            return None, True
+            return self.handle_branchind(op)
         elif opc is OpCode.RETURN:
-            self.handle_return(op)
-            return None, True
+            return self.handle_return(op)
         elif opc is OpCode.CALLIND:
-            self.handle_callind(op)
-            return None, True
+            return self.handle_callind(op)
         elif opc is OpCode.CALLOTHER:
-            self.handle_callother(op)
-            return None, False
+            return self.handle_callother(op)
         else:
             raise NotImplementedError(str(op))
         return None, False
@@ -471,19 +469,24 @@ class PCodeEmu:
     def handle_cbranch(self, op: PcodeOp):
         if op.b():
             return op.a(), False
+        return None, False
 
     def handle_branchind(self, op: PcodeOp):
         self.regs.pc = op.a()
+        return None, True
 
     def handle_return(self, op: PcodeOp):
         self.regs.pc = op.a()
+        return None, True
 
     def handle_callind(self, op: PcodeOp):
         self.regs.pc = op.a()
+        return None, True
 
     def handle_callother(self, op: PcodeOp):
         assert op.a() == 0 and op.b() == 0x8
         self.software_interrupt(self.regs.int_num)
+        return None, False
 
     def software_interrupt(self, int_num: int):
         iprint(f"got sw int: {int_num:#06x}", int_num)
