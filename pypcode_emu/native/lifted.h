@@ -2,11 +2,10 @@
 
 #include <cstdint>
 
+#include "lifted-regs.h"
 #include "lifted-types.h"
 
 constexpr int bytes_per_instr = 4;
-
-#include "lifted-regs.h"
 
 using seg_t = struct {
     uptr addr;
@@ -17,8 +16,6 @@ using seg_t = struct {
 
 extern "C" {
 extern u8 *mem;
-
-extern regs_t regs;
 
 extern const u8 num_segs;
 extern const seg_t segs[];

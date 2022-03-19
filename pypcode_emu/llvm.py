@@ -869,9 +869,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
             p("#pragma once")
             p()
-            p("#ifdef __cplusplus")
-            p('extern "C" {')
-            p("#endif")
+            p('#include "lifted-types.h"')
             p()
             p("typedef struct {")
             for rname in reg_names:
@@ -880,10 +878,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             p("} regs_t;")
             p()
             p("extern regs_t regs;")
-            p()
-            p("#ifdef __cplusplus")
-            p('}; // extern "C"')
-            p("#endif")
             p()
 
         with open(lifted_regs_cpp, "w") as f:
@@ -917,6 +911,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         fmt_inc_dir = (
             importlib.resources.files(__package__) / "native" / "fmt" / "include"
         )
+        native_dir = importlib.resources.files(__package__) / "native"
 
         lifted_regs_cpp = build_dir / "lifted-regs.cpp"
         lifted_regs_h = build_dir / "lifted-regs.h"
@@ -925,7 +920,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_regs_s = lifted_regs_cpp + ".s"
         lifted_regs_ll = lifted_regs_cpp + ".ll"
 
-        harness_cpp = importlib.resources.files(__package__) / "native" / "harness.cpp"
+        harness_cpp = native_dir / "harness.cpp"
         harness_base = Path("build") / harness_cpp.name
         harness_o = harness_base + ".o"
         harness_ll = harness_base + ".ll"
@@ -943,7 +938,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_bc_opt_ll = lifted_bc_ll + ".opt.ll"
         lifted_bc_opt_s = lifted_bc_ll + ".opt.s"
 
-        lifted_cpp = importlib.resources.files(__package__) / "native" / "lifted.cpp"
+        lifted_cpp = native_dir / "lifted.cpp"
         lifted_base = Path("build") / lifted_cpp.name
         lifted_o = lifted_base + ".o"
         lifted_ll = lifted_base + ".ll"
@@ -956,6 +951,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         CXXFLAGS = [
             "-I",
             fmt_inc_dir,
+            "-I",
+            native_dir,
             "-I",
             build_dir,
             "-g",
@@ -1039,6 +1036,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             lifted_bc_o,
             harness_o,
             lifted_o,
+            lifted_regs_o,
             lifted_segs_o,
             *LIBS,
         )
