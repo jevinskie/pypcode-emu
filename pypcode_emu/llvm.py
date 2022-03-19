@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import importlib.resources
 import math
-import operator
-import operator as opr
 import os
 import platform
 from typing import Callable, ClassVar, Optional, Union
@@ -11,13 +9,14 @@ from typing import Callable, ClassVar, Optional, Union
 from bidict import bidict
 from icecream import ic
 from llvmlite import ir
+from more_itertools import chunked
 from path import Path
 from pypcode import AddrSpace, PcodeOp, Varnode
 from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
 from .elf import PF, PT
-from .emu import ELFPCodeEmu, Int, UniqueBuf
+from .emu import ELFPCodeEmu, UniqueBuf
 from .ntypes import (
     int8,
     int16,
@@ -861,17 +860,51 @@ class LLVMELFLifter(ELFPCodeEmu):
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))
 
-    def gen_lifted_regs_h(self, lifted_regs_h):
+    def gen_lifted_regs_src(self, lifted_regs_cpp, lifted_regs_h):
+        reg_names = self.ctx.get_register_names()
+        # max_rname_len = max(map(len, reg_names))
+        max_rname_len = 5
+
         with open(lifted_regs_h, "w") as f:
             p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
             p("#pragma once")
             p()
+            p("#ifdef __cplusplus")
+            p('extern "C" {')
+            p("#endif")
+            p()
             p("typedef struct {")
-            reg_names = self.ctx.get_register_names()
             for rname in reg_names:
                 reg = self.ctx.get_register(rname)
                 p(f"    u{reg.size * 8} {rname};")
             p("} regs_t;")
+            p()
+            p("extern regs_t regs;")
+            p()
+            p("#ifdef __cplusplus")
+            p('}; // extern "C"')
+            p("#endif")
+            p()
+
+        with open(lifted_regs_cpp, "w") as f:
+            p = lambda *args, **kwargs: print(*args, **kwargs, file=f)
+            p('#include "lifted-regs.h"')
+            p()
+            p("#include <fmt/format.h>")
+            p()
+            p("regs_t regs;")
+            p()
+            p("void regs_dump() {")
+            for rnames in chunked(reg_names, 4):
+                fmt_str = "    ".join(
+                    [
+                        f"{n:{max_rname_len}s}: {{:#0{self.ctx.get_register(n).size * 2 + 2}x}}"
+                        for n in rnames
+                    ]
+                )
+                fmt_args = ", ".join([f"regs.{n}" for n in rnames])
+                p(f'    fmt::print("{fmt_str}\\n", {fmt_args});')
+            p("}")
             p()
 
     def compile(self, opt: str = "z", asan: bool = False):
@@ -885,8 +918,12 @@ class LLVMELFLifter(ELFPCodeEmu):
             importlib.resources.files(__package__) / "native" / "fmt" / "include"
         )
 
+        lifted_regs_cpp = build_dir / "lifted-regs.cpp"
         lifted_regs_h = build_dir / "lifted-regs.h"
-        self.gen_lifted_regs_h(lifted_regs_h)
+        self.gen_lifted_regs_src(lifted_regs_cpp, lifted_regs_h)
+        lifted_regs_o = lifted_regs_cpp + ".o"
+        lifted_regs_s = lifted_regs_cpp + ".s"
+        lifted_regs_ll = lifted_regs_cpp + ".ll"
 
         harness_cpp = importlib.resources.files(__package__) / "native" / "harness.cpp"
         harness_base = Path("build") / harness_cpp.name
@@ -939,6 +976,19 @@ class LLVMELFLifter(ELFPCodeEmu):
         CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
         CXX(*CXXFLAGS, "-c", "-o", harness_s, "-S", harness_cpp, "-g0")
         CXX(*CXXFLAGS, "-c", "-o", harness_ll, "-S", "-emit-llvm", harness_cpp, "-g0")
+
+        CXX(*CXXFLAGS, "-c", "-o", lifted_regs_o, lifted_regs_cpp)
+        CXX(*CXXFLAGS, "-c", "-o", lifted_regs_s, "-S", lifted_regs_cpp, "-g0")
+        CXX(
+            *CXXFLAGS,
+            "-c",
+            "-o",
+            lifted_regs_ll,
+            "-S",
+            "-emit-llvm",
+            lifted_regs_cpp,
+            "-g0",
+        )
 
         CXX(*CXXFLAGS, "-c", "-o", lifted_segs_o, lifted_segs_s)
 
