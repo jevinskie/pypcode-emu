@@ -12,7 +12,7 @@ from bidict import bidict
 from icecream import ic
 from llvmlite import ir
 from path import Path
-from pypcode import PcodeOp, Varnode
+from pypcode import AddrSpace, PcodeOp, Varnode
 from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
@@ -64,12 +64,14 @@ def ibN(nbytes: int) -> ir.Type:
 
 class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
+    _self_space: Optional[AddrSpace]
     _self_conc: Optional[nint]
 
-    def __init__(self, v, concrete: Optional[nint] = None):
+    def __init__(self, v, space: Optional[AddrSpace], concrete: Optional[nint] = None):
         if isinstance(v, IntVal) and isinstance(ObjectProxy):
             v = v.w
         super().__init__(v)
+        self._self_space = space
         if concrete is None and self.is_const:
             try:
                 concrete = uintN(self.size)(int(self.constant))
@@ -85,14 +87,24 @@ class IntVal(ObjectProxy):
     def w(self):
         return self.__wrapped__
 
+    def cmn_space(self, other: IntVal) -> Optional[AddrSpace]:
+        if self.space is other.space:
+            return self.space
+        return None
+
     @property
-    def conc(self) -> int:
+    def space(self) -> Optional[AddrSpace]:
+        return self._self_space
+
+    @property
+    def conc(self) -> nint:
         if self._self_conc is None:
             raise TypeError(f"{type(self)} is not concrete")
         return self._self_conc
 
     @property
     def size(self) -> int:
+        assert self.type is not i1
         return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
 
     @property
@@ -107,15 +119,19 @@ class IntVal(ObjectProxy):
         if self.is_const:
             val = self.w.sext(ibN(size))
             c = self.conc.sext(size * 8)
-            return type(self)(val, concrete=c)
-        return type(self)(self.ctx.bld.sext(self, ibN(size), name="sext"))
+            return type(self)(val, space=self.space, concrete=c)
+        return type(self)(
+            self.ctx.bld.sext(self, ibN(size), name="sext"), space=self.space
+        )
 
     def zext(self, size: int) -> IntVal:
         if self.is_const:
             val = self.w.zext(ibN(size))
             c = self.conc.zext(size * 8)
-            return type(self)(val, concrete=c)
-        return type(self)(self.ctx.bld.zext(self, ibN(size), name="zext"))
+            return type(self)(val, space=self.space, concrete=c)
+        return type(self)(
+            self.ctx.bld.zext(self, ibN(size), name="zext"), space=self.space
+        )
 
     # these are dummy since, unlike python, everything is 2's compliment
     def s2u(self) -> IntVal:
@@ -142,11 +158,13 @@ class IntVal(ObjectProxy):
             val = val_func(other)
             c_func = getattr(self.conc, dunder_op_name)
             c = c_func(other.conc)
-            return type(self)(val, concrete=c)
+            return type(self)(val, space=self.cmn_space(other), concrete=c)
         llvm_name = llvm_name or pretty_op_name
         op_bld_func = getattr(self.ctx.bld, llvm_name)
         name = name or op_name
-        return type(self)(op_bld_func(self, other, name=name))
+        return type(self)(
+            op_bld_func(self, other, name=name), space=self.cmn_space(other)
+        )
 
     def bin_op(
         self,
@@ -162,11 +180,13 @@ class IntVal(ObjectProxy):
             val = val_func(other)
             c_func = getattr(self.conc, dunder_op_name)
             c = c_func(other.conc)
-            return type(self)(val, concrete=c)
+            return type(self)(val, space=self.cmn_space(other), concrete=c)
         llvm_name = llvm_name or pretty_op_name
         op_bld_func = getattr(self.ctx.bld, llvm_name)
         name = name or op_name
-        return type(self)(op_bld_func(self, other, name=name))
+        return type(self)(
+            op_bld_func(self, other, name=name), space=self.cmn_space(other)
+        )
 
     def cmp_op(
         self,
@@ -183,26 +203,29 @@ class IntVal(ObjectProxy):
             else:
                 val = self.w.icmp_unsigned(uop, other)
             c = self.conc.cmp(op, other)
-            return type(self)(val, concrete=c)
-        name = f"_{name}" or ""
+            return type(self)(val, space=self.cmn_space(other), concrete=c)
+        name = f"_{name}" if name else ""
         val_name = f"{signed_prefix}{nint.CMP_MAP[uop]}{name}"
         if signed:
             val = self.ctx.bld.icmp_signed(uop, self, other, name=val_name)
         else:
             val = self.ctx.bld.icmp_unsigned(uop, self, other, name=val_name)
-        return type(self)(val)
+        return type(self)(val, space=self.cmn_space(other))
 
     def carry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
             s = self.conc.as_u + other.conc.as_u
             int_max = (1 << (self.size * 8)) - 1
             val = 1 if s > int_max else 0
-            return type(self)(i1(val), concrete=uint8(val))
+            return type(self)(i8(val), space=self.cmn_space(other), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.uadd_ovf[self.type], [self, other], name="uovf_s"
         )
         ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="uovf_bit")
-        return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"))
+        return type(self)(
+            self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"),
+            space=self.cmn_space(other),
+        )
 
     def scarry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
@@ -210,12 +233,15 @@ class IntVal(ObjectProxy):
             int_min = -(1 << (self.size * 8 - 1))
             int_max = (1 << (self.size * 8 - 1)) - 1
             val = 1 if not int_min <= s <= int_max else 0
-            return type(self)(i1(val), concrete=uint8(val))
+            return type(self)(i8(val), space=self.cmn_space(other), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
             self.ctx.intrinsics.sadd_ovf[self.type], [self, other], name="sovf_s"
         )
         ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="sovf_bit")
-        return type(self)(self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"))
+        return type(self)(
+            self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"),
+            space=self.cmn_space(other),
+        )
 
     def asr(self, nbits: IntVal) -> IntVal:
         return self.bin_op(nbits, "asr", llvm_name="ashr")
@@ -241,9 +267,12 @@ class IntVal(ObjectProxy):
                 return true_val
             else:
                 return false_val
-        bool_v = self.cmp_op("!=", type(self)(self.type(0)), name="cmov_cond")
+        bool_v = self.cmp_op(
+            "!=", type(self)(self.type(0), space=None), name="cmov_cond"
+        )
         return type(self)(
-            self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
+            self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val"),
+            space=true_val.cmn_space(false_val),
         )
 
     def slt(self, other: IntVal) -> IntVal:
@@ -329,6 +358,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     mem_gv: ir.GlobalVariable
     mem_lv: ir.LoadInstr
     mem_base_lv: ir.CastInstr
+    bb_bbs: Optional[dict[tuple[int, int], ir.Block]]
     addr2bb_t: ir.Type
     addr2bb_gv: ir.GlobalVariable
     text_start_gv: ir.GlobalVariable
@@ -359,6 +389,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
+        self.bb_bbs = None
         int_t = IntVal.class_with_lifter(self)
 
         super().__init__(elf_path, entry=entry, int_t=int_t)
@@ -372,7 +403,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             num_exec_segs += 1
         assert num_exec_segs == 1
         iprint(f"exec start: {self.exec_start:#010x} end: {self.exec_end:#010x}")
-        self.addr2bb = [None for _ in self.text_addrs]
+        self.addr2bb = [None for _ in self.text_addrs_sentinel]
 
         if self.bitness == 32:
             self.iptr = i32
@@ -408,9 +439,13 @@ class LLVMELFLifter(ELFPCodeEmu):
     def text_addrs(self):
         return range(self.exec_start, self.exec_end, self.instr_len)
 
+    @property
+    def text_addrs_sentinel(self):
+        return [*self.text_addrs, self.exec_end]
+
     def addr2bb_idx(self, addr: int) -> int:
         assert addr % self.instr_len == 0
-        assert self.exec_start <= addr < self.exec_end
+        assert self.exec_start <= addr <= self.exec_end
         return (addr - self.exec_start) // self.instr_len
 
     def get_init_mod(self) -> ir.Module:
@@ -509,7 +544,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 mapped_load_addr, load_ty.as_pointer(), name="load_ptr"
             )
             load_v = self.bld.load(load_ptr, name="load")
-            return self.int_t(self.gen_bswap(load_v))
+            return self.int_t(self.gen_bswap(load_v), space=self.ram_space)
 
         return load_getter
 
@@ -525,19 +560,21 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return get_unique
         elif vn.space is self.const_space:
-            const_v = self.int_t(ibN(vn.size)(vn.offset))
+            const_v = self.int_t(ibN(vn.size)(vn.offset), space=self.const_space)
 
             def get_constant() -> IntVal:
                 return const_v
 
             return get_constant
-        elif vn.space is self.register_space:
+        elif vn.space is self.reg_space:
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
                 gep = self.regs_gv.gep([i32(0), i32(ridx)])
-                return self.int_t(self.bld.load(gep, name=self.alias_reg(rname)))
+                return self.int_t(
+                    self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
+                )
 
             return get_register
         elif vn.space is self.ram_space:
@@ -555,7 +592,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
                 load_val = self.bld.load(load_ptr, name="mem_load")
                 bswapped = self.gen_bswap(load_val)
-                return self.int_t(bswapped)
+                return self.int_t(bswapped, space=self.ram_space)
 
             return get_ram
         else:
@@ -568,25 +605,23 @@ class LLVMELFLifter(ELFPCodeEmu):
             vn = vn()
         if vn.space is self.unique_space:
 
-            def set_unique(v: IntVal):
+            def set_unique(v: IntVal) -> None:
                 unique[vn.offset : vn.offset + vn.size] = v
 
             return set_unique
         elif vn.space is self.const_space:
             raise ValueError("setting const?")
-        elif vn.space is self.register_space:
+        elif vn.space is self.reg_space:
             rname = vn.get_register_name()
             ridx = self.reg_idx(rname)
 
-            def set_register(v: IntVal) -> IntVal:
-                return self.int_t(
-                    self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
-                )
+            def set_register(v: IntVal) -> None:
+                return self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
 
             return set_register
         elif vn.space is self.ram_space:
 
-            def set_ram(v: IntVal):
+            def set_ram(v: IntVal) -> None:
                 bswapped = self.gen_bswap(v)
                 gep = self.bld.gep(
                     self.mem_lv,
@@ -605,20 +640,34 @@ class LLVMELFLifter(ELFPCodeEmu):
             raise NotImplementedError(vn.space.name)
 
     def handle_cbranch(self, op: PcodeOp):
-        if op.b():
-            return op.a(), False
+        tgt = op.a()
+        cond_v = op.b()
+        if cond_v.is_const:
+            raise NotImplementedError("horray you found an optimization opportunity")
+        if tgt.space is self.const_space:
+            assert tgt.is_const
+            true_bb = self.bb_bbs[(op.address, op.seq.uniq + tgt.conc.v)]
+            false_bb = self.bb_bbs[(op.address, op.seq.uniq + 1)]
+            self.bld.cbranch(cond_v, true_bb, false_bb)
+            return tgt, True
+        else:
+            self.gen_bb_caller_call(tgt, tail=False)
+            return None, True
 
     def handle_branchind(self, op: PcodeOp):
-        # raise NotImplementedError
+        # FIXME: constexpr
         self.gen_bb_caller_call(op.a())
+        return None, True
 
     def handle_return(self, op: PcodeOp):
-        # raise NotImplementedError
+        # FIXME: constexpr
         self.gen_bb_caller_call(op.a())
+        return None, True
 
     def handle_callind(self, op: PcodeOp):
-        # raise NotImplementedError
+        # FIXME: constexpr
         self.gen_bb_caller_call(op.a())
+        return None, True
 
     def handle_callother(self, op: PcodeOp):
         raise NotImplementedError
@@ -648,16 +697,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.ret_void()
         return f
 
-    def gen_bb_caller_call(self, bb_addr: IntVal):
+    def gen_bb_caller_call(self, bb_addr: IntVal, tail=True):
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
                 [],
-                tail=True,
+                tail=tail,
                 name="bb_call_direct",
             )
         else:
-            call = self.bld.call(self.bb_caller, [bb_addr], tail=True, name="bb_call")
+            call = self.bld.call(self.bb_caller, [bb_addr], tail=tail, name="bb_call")
         self.bld.ret_void()
 
     def gen_instr_cb_call(self, bb: int, pc: int):
@@ -715,15 +764,26 @@ class LLVMELFLifter(ELFPCodeEmu):
             instrs = self.translate(addr)
         except RuntimeError as e:
             return None
-        bbs: dict[tuple[int, int], ir.Block] = {}
+        self.bb_bbs = {}
 
+        prev_inst_last_bb = None
         for instr in instrs:
             inst_addr = instr.address.offset
-            for i in range(len(instr.ops)):
+            for i in range(len(instr.ops) + 1):
                 bb = f.append_basic_block(f"pc_{inst_addr:#010x}_{i}")
-                bbs[(inst_addr, i)] = bb
+                self.bb_bbs[(inst_addr, i)] = bb
+                if i == 0 and prev_inst_last_bb:
+                    with self.bld.goto_block(prev_inst_last_bb):
+                        self.bld.branch(bb)
+            prev_inst_last_bb = bb
+        with self.bld.goto_block(bb):
+            next_pc = self.int_t(
+                self.iptr(instr.address.offset + instr.length + instr.length_delay),
+                space=self.const_space,
+            )
+            self.gen_bb_caller_call(next_pc, tail=True)
 
-        entry_bb = list(bbs.items())[0][1]
+        entry_bb = list(self.bb_bbs.items())[0][1]
         self.bld.position_at_end(entry_bb)
         self.mem_lv = self.bld.load(self.mem_gv, name="mem_ptr")
         self.mem_base_lv = self.bld.ptrtoint(self.mem_lv, i64, name="mem_base_int")
@@ -734,18 +794,25 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             num_ops = len(instr.ops)
             for i, op in enumerate(instr.ops):
-                self.bld.position_at_end(bbs[(inst_addr, i)])
+                order = op.seq.order
+                print(f"i: {i} order: {order} uniq: {op.seq.uniq}")
+                assert i == op.seq.uniq
+                self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
                 if i == 0:
-                    self.gen_instr_cb_call(addr, instr.address.offset)
-                self.gen_op_cb_call(addr, instr.address.offset, i, op.opcode.value)
-                self.emu_pcodeop(op)
+                    pass
+                    # self.gen_instr_cb_call(addr, inst_addr)
+                # self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
+                op_br_off, was_terminated = self.emu_pcodeop(op)
+                if not was_terminated:
+                    next_bb = self.bb_bbs[(inst_addr, i + 1)]
+                    self.bld.branch(next_bb)
 
         return f
 
     def lift(self):
         self.lift_demo()
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
-        for addr in self.text_addrs:
+        for addr in self.text_addrs_sentinel:
             f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
             f.linkage = "internal"
             f.calling_convention = "fastcc"
@@ -757,7 +824,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             lifted_f = self.gen_bb_func(addr, f)
             if lifted_f:
                 translated_bbs.add(addr)
-        for addr in set(self.text_addrs) - translated_bbs:
+        for addr in set(self.text_addrs_sentinel) - translated_bbs:
             bb_func = self.addr2bb[self.addr2bb_idx(addr)]
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()

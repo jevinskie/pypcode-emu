@@ -142,7 +142,7 @@ class PCodeEmu:
         }
         self.ram_space = self.ctx.spaces["ram"]
         self.unique_space = self.ctx.spaces["unique"]
-        self.register_space = self.ctx.spaces["register"]
+        self.reg_space = self.ctx.spaces["register"]
         self.const_space = self.ctx.spaces["const"]
         self.bb_cache = {}
         self.reg_names = self.ctx.get_register_names()
@@ -225,7 +225,7 @@ class PCodeEmu:
     def space2buf(self, space: AddrSpace, unique: Optional[UniqueBuf] = None):
         return {
             self.ram_space: self.ram,
-            self.register_space: self.register,
+            self.reg_space: self.register,
             self.unique_space: unique,
         }[space]
 
@@ -333,7 +333,7 @@ class PCodeEmu:
             return get_unique
         elif vn.space is self.const_space:
             return lambda: self.int_t(vn.offset, vn.size)
-        elif vn.space is self.register_space:
+        elif vn.space is self.reg_space:
 
             def get_register() -> Int:
                 return self.int_t(
@@ -378,7 +378,7 @@ class PCodeEmu:
             return set_unique
         elif vn.space is self.const_space:
             raise ValueError("setting const?")
-        elif vn.space is self.register_space:
+        elif vn.space is self.reg_space:
 
             def set_register(v: Int):
                 if not isinstance(v, self.int_t):
