@@ -246,8 +246,14 @@ class IntVal(ObjectProxy):
             self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val")
         )
 
+    def slt(self, other: IntVal) -> IntVal:
+        return self.cmp_op("s<", other)
+
     def __lt__(self, other: IntVal) -> IntVal:
         return self.cmp_op("<", other)
+
+    def sle(self, other: IntVal) -> IntVal:
+        return self.cmp_op("s<=", other)
 
     def __le__(self, other: IntVal) -> IntVal:
         return self.cmp_op("<=", other)
@@ -258,8 +264,14 @@ class IntVal(ObjectProxy):
     def __ne__(self, other: IntVal) -> IntVal:
         return self.cmp_op("!=", other)
 
+    def sge(self, other: IntVal) -> IntVal:
+        return self.cmp_op("s>=", other)
+
     def __ge__(self, other: IntVal) -> IntVal:
         return self.cmp_op(">=", other)
+
+    def sgt(self, other: IntVal) -> IntVal:
+        return self.cmp_op("s>", other)
 
     def __gt__(self, other: IntVal) -> IntVal:
         return self.cmp_op(">", other)
