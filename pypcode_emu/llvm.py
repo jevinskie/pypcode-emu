@@ -170,28 +170,6 @@ class IntVal(ObjectProxy):
             op_bld_func(self, other, name=name), space=self.cmn_space(other)
         )
 
-    def bin_op(
-        self,
-        other: IntVal,
-        op_name: str,
-        llvm_name: Optional[str] = None,
-        name: Optional[str] = None,
-    ) -> IntVal:
-        pretty_op_name = op_name.rstrip("_")
-        dunder_op_name = f"__{pretty_op_name}__"
-        if self.is_const and other.is_const:
-            val_func = getattr(self.w, op_name)
-            val = val_func(other)
-            c_func = getattr(self.conc, dunder_op_name)
-            c = c_func(other.conc)
-            return type(self)(val, space=self.cmn_space(other), concrete=c)
-        llvm_name = llvm_name or pretty_op_name
-        op_bld_func = getattr(self.ctx.bld, llvm_name)
-        name = name or op_name
-        return type(self)(
-            op_bld_func(self, other, name=name), space=self.cmn_space(other)
-        )
-
     def cmp_op(
         self,
         op: str,
