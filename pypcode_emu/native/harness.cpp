@@ -19,10 +19,6 @@ void setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x400
     assert(mem);
 }
 
-void print_r3(void) {
-    fmt::print("r3: {:#010x} r5: {:#010x}\n", regs.r3, regs.r5);
-}
-
 int main(int argc, const char **argv) {
     (void)argc;
     (void)argv;
@@ -31,7 +27,6 @@ int main(int argc, const char **argv) {
     lifted_init();
     lifted_run();
     fmt::print("pc: {:#010x}\n", regs.pc);
-    print_r3();
 
     double a = 243.0;
     double b = 42.0;

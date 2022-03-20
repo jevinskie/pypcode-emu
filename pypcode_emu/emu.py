@@ -568,20 +568,22 @@ class PCodeEmu:
         self.ram[addr : addr + len(buf)] = buf
 
     @staticmethod
-    def dump(instr: Union[Translation, Sequence[Translation]]):
+    def desc(insn: Translation) -> str:
+        return "%08x/%d[%d]: %s %s" % (
+            insn.address.offset,
+            insn.length,
+            insn.length_delay,
+            insn.asm_mnem,
+            insn.asm_body,
+        )
+
+    @classmethod
+    def dump(cls, instr: Union[Translation, Sequence[Translation]]):
         if not isinstance(instr, collections.Sequence):
             instr = (instr,)
         for insn in instr:
             dprint("-" * 80)
-            dprint(
-                "%08x/%d: %s %s"
-                % (
-                    insn.address.offset,
-                    insn.length,
-                    insn.asm_mnem,
-                    insn.asm_body,
-                )
-            )
+            dprint(cls.desc(insn))
             dprint("-" * 80)
             for op in insn.ops:
                 dprint("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))

@@ -12,7 +12,7 @@ from icecream import ic
 from llvmlite import ir
 from more_itertools import chunked
 from path import Path
-from pypcode import AddrSpace, PcodeOp, Varnode
+from pypcode import AddrSpace, PcodeOp, Translation, Varnode
 from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
@@ -59,7 +59,7 @@ void = ir.VoidType()
 
 size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
 
-PRINTF_PTR_RE = re.compile("(%p)|(%%)")
+PRINTF_FMT_RE = re.compile("(%(p|d|u|x|s))|(%%)")
 
 
 def ibN(nbytes: int) -> ir.Type:
@@ -71,8 +71,10 @@ class IntVal(ObjectProxy):
     _self_space: Optional[AddrSpace]
     _self_conc: Optional[nint]
 
-    def __init__(self, v, space: Optional[AddrSpace], concrete: Optional[nint] = None):
-        if isinstance(v, IntVal) and isinstance(ObjectProxy):
+    def __init__(
+        self, v, space: Optional[AddrSpace] = None, concrete: Optional[nint] = None
+    ):
+        if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
             v = v.w
         super().__init__(v)
         self._self_space = space
@@ -383,6 +385,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
         self.strpool = CStringPool(self.m)
+        self.printf = self.gen_printf_decl()
         self.bb_bbs = None
         int_t = IntVal.class_with_lifter(self)
 
@@ -407,7 +410,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.isz = i64
 
         self.untrans_panic = self.gen_utrans_panic_decl()
-        self.printf = self.gen_printf_decl()
         self.instr_cb, self.op_cb = self.gen_cb_decls()
 
         self.gen_text_addrs()
@@ -523,6 +525,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             )
             bswap_v = self.gen_bswap(v)
             self.bld.store(bswap_v, store_ptr)
+            if self.trace:
+                self.gen_printf_call(f"*%p = 0x%x\n", store_ptr, v)
 
         return store_setter
 
@@ -542,7 +546,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                 mapped_load_addr, load_ty.as_pointer(), name="load_ptr"
             )
             load_v = self.bld.load(load_ptr, name="load")
-            return self.int_t(self.gen_bswap(load_v), space=self.ram_space)
+            res = self.int_t(self.gen_bswap(load_v), space=self.ram_space)
+            if self.trace:
+                self.gen_printf_call(f"0x%x = *%p\n", res, load_ptr)
+            return res
 
         return load_getter
 
@@ -554,7 +561,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         if vn.space is self.unique_space:
 
             def get_unique() -> IntVal:
-                return unique[vn.offset : vn.offset + vn.size]
+                res = unique[vn.offset : vn.offset + vn.size]
+                if self.trace:
+                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                return res
 
             return get_unique
         elif vn.space is self.const_space:
@@ -570,9 +580,12 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             def get_register() -> IntVal:
                 gep = self.regs_gv.gep([i32(0), i32(ridx)])
-                return self.int_t(
+                res = self.int_t(
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
+                if self.trace:
+                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                return res
 
             return get_register
         elif vn.space is self.ram_space:
@@ -590,7 +603,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
                 load_val = self.bld.load(load_ptr, name="mem_load")
                 bswapped = self.gen_bswap(load_val)
-                return self.int_t(bswapped, space=self.ram_space)
+                res = self.int_t(bswapped, space=self.ram_space)
+                if self.trace:
+                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                return res
 
             return get_ram
         else:
@@ -605,6 +621,8 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             def set_unique(v: IntVal) -> None:
                 unique[vn.offset : vn.offset + vn.size] = v
+                if self.trace:
+                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
 
             return set_unique
         elif vn.space is self.const_space:
@@ -614,7 +632,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def set_register(v: IntVal) -> None:
-                return self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
+                self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
+                if self.trace:
+                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
 
             return set_register
         elif vn.space is self.ram_space:
@@ -632,6 +652,8 @@ class LLVMELFLifter(ELFPCodeEmu):
                     gep, store_t.as_pointer(), name="mem_store_ptr"
                 )
                 self.bld.store(bswapped, store_ptr)
+                if self.trace:
+                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
 
             return set_ram
         else:
@@ -708,29 +730,85 @@ class LLVMELFLifter(ELFPCodeEmu):
         if ret:
             self.bld.ret_void()
 
-    def gen_instr_cb_call(self, bb: int, pc: int):
+    def gen_instr_cb_call(self, bb: int, inst: Translation):
         self.bld.call(
-            self.instr_cb, [self.iptr(bb), self.iptr(pc)], name="inst_cb_call"
+            self.instr_cb,
+            [
+                self.iptr(bb),
+                self.iptr(inst.address.offset),
+                self.strpool[self.desc(inst)],
+            ],
+            name="inst_cb_call",
         )
 
-    def gen_op_cb_call(self, bb: int, pc: int, op_idx: int, opc: int):
+    def gen_op_cb_call(self, bb: int, op: PcodeOp):
         self.bld.call(
             self.op_cb,
-            [self.iptr(bb), self.iptr(pc), i32(op_idx), i32(opc)],
+            [
+                self.iptr(bb),
+                self.iptr(op.address),
+                i32(op.seq.order),
+                i32(op.opcode.value),
+                self.strpool[str(op)],
+            ],
             name="op_cb_call",
         )
+
+    def printf_fmt_spec(self, ty: ir.IntType, signed: bool = False, x: bool = False):
+        sz_fmt_map = {
+            i1: "hh",
+            i8: "hh",
+            i16: "h",
+            i32: "",
+            i64: "l",
+        }
+        sz = sz_fmt_map[ty]
+        if x:
+            return f"%0{ty.width // 4}{sz}x"
+        elif signed:
+            return f"%{sz}d"
+        else:
+            return f"%{sz}u"
 
     def gen_printf_call(
         self, fmt: str, *args, name: Optional[str] = None
     ) -> ir.CallInstr:
-        def fix_ptr_fmt(match: re.Match):
-            if match.group(0):
-                return "0x%08x" if self.bitness == 32 else "0x%016lx"
-            return match.string
-
-        fmt = re.sub(PRINTF_PTR_RE, fix_ptr_fmt, fmt)
-        fmt_val = self.strpool[fmt]
         args = [*args]
+        # (%p)|(%d)|(%u)|(%x)|(%s)|(%%)
+        match_num = 0
+
+        def fix_fmt(match: re.Match):
+            nonlocal match_num, args
+            arg = self.int_t(args[match_num])
+            if match.group(1):
+                ty_str = match.group(2)
+                if ty_str == "p":
+                    assert arg.type.is_pointer
+                    if arg.is_const:
+                        arg = self.int_t(arg.w.ptrtoint(self.iptr))
+                    else:
+                        arg = self.int_t(
+                            self.bld.ptrtoint(arg, self.iptr, name="fmt_cast")
+                        )
+                    res = "0x" + self.printf_fmt_spec(arg.type, x=True)
+
+                elif ty_str == "d":
+                    assert not arg.type.is_pointer
+                    res = self.printf_fmt_spec(arg.type, signed=True)
+                elif ty_str == "u":
+                    assert not arg.type.is_pointer
+                    res = self.printf_fmt_spec(arg.type, signed=False)
+                elif ty_str == "x":
+                    assert not arg.type.is_pointer
+                    res = self.printf_fmt_spec(arg.type, x=True)
+            else:
+                res = match.string
+            args[match_num] = arg
+            match_num += 1
+            return res
+
+        fmt = re.sub(PRINTF_FMT_RE, fix_fmt, fmt)
+        fmt_val = self.strpool[fmt]
         if isinstance(fmt, str):
             fmt = self.strpool[fmt]
         for i in range(len(args)):
@@ -742,9 +820,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         return self.bld.call(self.printf, [fmt, *args], name=name)
 
     def gen_cb_decls(self):
-        instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr])
+        instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr, i8.as_pointer()])
         instr_cb = ir.Function(self.m, instr_cb_t, "instr_cb")
-        op_cb_t = ir.FunctionType(void, [self.iptr, self.iptr, i32, i32])
+        op_cb_t = ir.FunctionType(
+            void, [self.iptr, self.iptr, i32, i32, i8.as_pointer()]
+        )
         op_cb = ir.Function(self.m, op_cb_t, "op_cb")
         return instr_cb, op_cb
 
@@ -825,9 +905,8 @@ class LLVMELFLifter(ELFPCodeEmu):
                 self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
                 if self.trace:
                     if i == 0:
-                        self.gen_instr_cb_call(addr, inst_addr)
-                    self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
-                self.gen_printf_call("hello %s 0x%lx\n", "world", "world")
+                        self.gen_instr_cb_call(addr, instr)
+                    self.gen_op_cb_call(addr, op)
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]

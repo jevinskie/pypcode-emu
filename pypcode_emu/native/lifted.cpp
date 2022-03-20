@@ -33,11 +33,11 @@ void untrans_panic(uptr pc) {
     exit(-1);
 }
 
-void instr_cb(uptr bb, uptr pc) {
-    fmt::print("BB: {:#010x} PC: {:#010x}\n", bb, pc);
+void instr_cb(uptr bb, uptr pc, const char *desc) {
+    fmt::print("BB: {:#010x} PC: {:#010x} {:s}\n", bb, pc, desc);
 }
 
-void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc) {
-    fmt::print("BB: {:#010x} PC: {:#010x} op idx: {:2d} opc: {:s} r5: {:#010x}\n", bb, pc, op_idx,
-               opc2str[opc], regs.r5);
+void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc) {
+    fmt::print("BB: {:#010x} PC: {:#010x} op idx: {:2d} opc: {:s} desc: {:s}\n", bb, pc, op_idx,
+               opc2str[opc], desc);
 }
