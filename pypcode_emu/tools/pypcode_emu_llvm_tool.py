@@ -12,6 +12,7 @@ def real_main(args):
         asan=args.asan,
         opt=args.O,
         trace=args.trace,
+        arg0=args.arg0,
     )
     lifter.lift()
     # try:
@@ -27,6 +28,14 @@ def main() -> int:
     parser.add_argument("elf", help="Input ELF file", metavar="ELF")
     parser.add_argument("exe", help="Output executable", metavar="EXE")
     parser.add_argument("-e", "--entry", help="Entry point", metavar="ENTRY")
+    parser.add_argument(
+        "-0",
+        "--arg0",
+        type=lambda n: int(n, 0),
+        default=0,
+        help="Argument 0",
+        metavar="ARG0",
+    )
     parser.add_argument(
         "-t", "--trace", default=False, help="Enable tracing", action="store_true"
     )
