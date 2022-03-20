@@ -385,6 +385,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     trace: bool
     strpool: CStringPool
     printf: ir.Function
+    exit: ir.Function
 
     def __init__(
         self,
@@ -417,6 +418,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         int_t = IntVal.class_with_lifter(self)
         self.strpool = CStringPool(self.m, int_t)
         self.printf = self.gen_printf_decl()
+        self.exit = self.gen_exit_decl()
         self.bb_bbs = None
 
         super().__init__(elf_path, entry=entry, int_t=int_t)
@@ -751,7 +753,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_fptr_ptr = self.bld.gep(
             self.addr2bb_gv,
             [self.iptr(0), off_iptrs],
-            inbounds=True,
             name="bb_fptr_ptr",
         )
         bb_fptr = self.bld.load(bb_fptr_ptr, name="bb_fptr")
@@ -903,6 +904,30 @@ class LLVMELFLifter(ELFPCodeEmu):
         printf_t.var_arg = True
         return ir.Function(self.m, printf_t, "printf")
 
+    def gen_exit_decl(self):
+        exit_t = ir.FunctionType(void, [i32])
+        exit_t.args[0].name = "status"
+        return ir.Function(self.m, exit_t, "exit")
+
+    def gen_exit_call(self, status: int):
+        self.bld.call(self.exit, [i32(status)], name="exit_call")
+
+    def gen_assert(self, cond: IntVal, msg: str):
+        def bld_assert(m):
+            self.gen_printf_call(
+                f"\n{cf.red}ASSERTION:{cf.reset}\n\n{cf.deepPink}{msg}{cf.reset}\n",
+                name="assert_printf",
+            )
+            self.gen_exit_call(-42)
+
+        if cond.is_const:
+            if not cond.conc:
+                bld_assert(msg)
+                return
+        pred = cond.cmp_op("==", type(cond)(0), name="assert_cmp")
+        with self.bld.if_else(pred):
+            bld_assert(msg)
+
     def gen_untrans_panic_call(self, addr: int, f: ir.Function):
         bb = f.append_basic_block("entry")
         self.bld.position_at_end(bb)
@@ -970,6 +995,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     if i == 0:
                         self.gen_instr_cb_call(addr, instr)
                     self.gen_op_cb_call(addr, op)
+                self.gen_assert(self.int_t(i8(0)), "uhoh!")
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]
