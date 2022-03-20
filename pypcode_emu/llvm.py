@@ -509,6 +509,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_t = self.m.context.get_identified_type("regs_t")
         self.regs_t.set_body(*struct_mem_types)
         self.regs_gv = ir.GlobalVariable(self.m, self.regs_t, "regs")
+        self.regs_gv.align = 16
         self.regs_lv = None
 
         # FIXME rename this function
@@ -730,7 +731,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.bld.cbranch(cond_v, true_bb, false_bb)
             return tgt, True
         else:
-            self.gen_bb_caller_call(tgt, tail=True)
+            self.gen_bb_caller_call(tgt)
             return None, True
 
     def handle_branchind(self, op: PcodeOp):
@@ -745,7 +746,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def handle_callind(self, op: PcodeOp):
         # FIXME: constexpr
-        self.gen_bb_caller_call(op.a(), tail=True)
+        self.gen_bb_caller_call(op.a())
         return None, True
 
     def handle_callother(self, op: PcodeOp):
@@ -820,20 +821,19 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         return f
 
-    def gen_bb_caller_call(self, bb_addr: IntVal, tail: bool = True, ret: bool = True):
+    def gen_bb_caller_call(self, bb_addr: IntVal):
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
                 [self.regs_lv],
-                tail=tail,
+                tail=True,
                 name="bb_call_direct",
             )
         else:
             call = self.bld.call(
-                self.bb_caller, [bb_addr, self.regs_lv], tail=tail, name="bb_call"
+                self.bb_caller, [bb_addr, self.regs_lv], tail=True, name="bb_call"
             )
-        if ret:
-            self.bld.ret_void()
+        self.bld.ret_void()
 
     def gen_instr_cb_call(self, bb: int, inst: Translation):
         self.bld.call(
@@ -1057,7 +1057,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 self.iptr(instr.address.offset + instr.length + instr.length_delay),
                 space=self.const_space,
             )
-            self.gen_bb_caller_call(next_pc, tail=True)
+            self.gen_bb_caller_call(next_pc)
 
         entry_bb = list(self.bb_bbs.items())[0][1]
         self.bld.position_at_end(entry_bb)
@@ -1124,7 +1124,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             for rname in reg_names:
                 reg = self.ctx.get_register(rname)
                 p(f"    u{reg.size * 8} {rname};")
-            p("} regs_t;")
+            p("} regs_t __attribute__((aligned(16)));")
             p()
             p('extern "C" regs_t regs;')
             p('extern "C" void regs_dump();')
