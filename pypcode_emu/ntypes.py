@@ -1,69 +1,64 @@
 import operator
 from typing import Type
 
+import nativetypes as nt
 from bidict import bidict
-from nativetypes import *
 
-uint1 = nint_type("uint1", 1, False)
-int1 = nint_type("int1", 1, True)
+uint1 = nt.nint_type("uint1", 1, False)
+int1 = nt.nint_type("int1", 1, True)
 
-size2uintN = bidict({0: uint1, 1: uint8, 2: uint16, 4: uint32, 8: uint64})
-size2intN = bidict({1: int1, 2: int16, 4: int32, 8: int64})
+size2uintN = bidict({0: uint1, 1: nt.uint8, 2: nt.uint16, 4: nt.uint32, 8: nt.uint64})
+size2intN = bidict({1: int1, 2: nt.int16, 4: nt.int32, 8: nt.int64})
 
 
-def uintN(nbytes: int) -> Type[nint]:
+def uintN(nbytes: int) -> Type[nt.nint]:
     return size2uintN[nbytes]
 
 
-def intN(nbytes: int) -> Type[nint]:
+def intN(nbytes: int) -> Type[nt.nint]:
     return size2intN[nbytes]
 
 
-def as_u(self: nint):
+def as_u(self: nt.nint):
     if self.v < 0:
-        return nint((1 << self.b) + self.v, self.b, False)
-    return nint(self.v, self.b, False)
+        return nt.nint((1 << self.b) + self.v, self.b, False)
+    return nt.nint(self.v, self.b, False)
 
 
-nint.as_u = property(as_u)
-del as_u
+nt.nint.as_u = property(as_u)
 
 
-def as_s(self: nint):
+def as_s(self: nt.nint):
     if self.s:
         return self
-    return nint(self.v, self.b, True)
+    return nt.nint(self.v, self.b, True)
 
 
-nint.as_s = property(as_s)
-del as_s
+nt.nint.as_s = property(as_s)
 
 
-def sext(self: nint, nbits: int):
-    return nint(self.as_s.v, nbits, True)
+def sext(self: nt.nint, nbits: int):
+    return nt.nint(self.as_s.v, nbits, True)
 
 
-nint.sext = sext
-del sext
+nt.nint.sext = sext
 
 
-def zext(self: nint, nbits: int):
-    return nint(self.as_u.v, nbits, False)
+def zext(self: nt.nint, nbits: int):
+    return nt.nint(self.as_u.v, nbits, False)
 
 
-nint.zext = zext
-del zext
+nt.nint.zext = zext
 
 
-def asr(self: nint, nbits: int):
-    return nint((self.as_s >> nbits).v, self.b, True)
+def asr(self: nt.nint, nbits: int):
+    return nt.nint((self.as_s >> nbits).v, self.b, True)
 
 
-nint.asr = asr
-del asr
+nt.nint.asr = asr
 
 
-CMP_MAP = {
+nt.nint.CMP_MAP = {
     ">": "gt",
     "<": "lt",
     "==": "eq",
@@ -73,20 +68,28 @@ CMP_MAP = {
 }
 
 
-def cmp(self: nint, cmp: str, other: nint) -> uint8:
+def cmp(self: nt.nint, cmp: str, other: nt.nint) -> nt.uint8:
     signed = cmp.startswith("s")
     if signed:
         a, b = self.as_s, other.as_s
     else:
         a, b = self.as_u, other.as_u
     cmp = cmp.lstrip("s")
-    py_op_name = f"__{CMP_MAP[cmp]}__"
+    py_op_name = f"__{nt.nint.CMP_MAP[cmp]}__"
     op_func = getattr(operator, py_op_name)
-    return uint8(1 if op_func(a, b) else 0)
+    return nt.uint8(1 if op_func(a, b) else 0)
 
 
-nint.CMP_MAP = CMP_MAP
-nint.cmp = cmp
-del CMP_MAP, cmp
+nt.nint.cmp = cmp
 
-del Type, bidict, operator
+exported_attrs_names = list(
+    filter(lambda n: not n.startswith("__") and not n.endswith("__"), dir(nt))
+)
+exported_attrs = [getattr(nt, n) for n in exported_attrs_names]
+exported_attrs = [*exported_attrs, uint1, int1]
+exported_attrs_names = [*exported_attrs_names, "uint1", "int1"]
+
+for n, a in zip(exported_attrs_names, exported_attrs):
+    globals()[n] = a
+
+__all__ = tuple(exported_attrs_names)

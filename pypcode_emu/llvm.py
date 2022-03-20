@@ -27,8 +27,6 @@ from .ntypes import (
     int64,
     intN,
     nint,
-    size2intN,
-    size2uintN,
     uint8,
     uint16,
     uint32,
@@ -206,7 +204,7 @@ class IntVal(ObjectProxy):
                 val = self.w.icmp_signed(uop, other)
             else:
                 val = self.w.icmp_unsigned(uop, other)
-            c = self.conc.cmp(op, other)
+            c = self.conc.cmp(op, other.conc)
             return type(self)(val, space=self.cmn_space(other), concrete=c)
         name = f"_{name}" if name else ""
         val_name = f"{signed_prefix}{nint.CMP_MAP[uop]}{name}"
@@ -913,19 +911,19 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.call(self.exit, [i32(status)], name="exit_call")
 
     def gen_assert(self, cond: IntVal, msg: str):
-        def bld_assert(m):
+        def bld_assert(m, kind="ASSERTION"):
             self.gen_printf_call(
-                f"\n{cf.red}ASSERTION:{cf.reset}\n\n{cf.deepPink}{msg}{cf.reset}\n",
+                f"\n{cf.red}{kind}:{cf.reset}\n\n{cf.deepPink}{msg}{cf.reset}\n",
                 name="assert_printf",
             )
             self.gen_exit_call(-42)
 
         if cond.is_const:
             if not cond.conc:
-                bld_assert(msg)
+                bld_assert(msg, kind="COMPILE-TIME ASSERTION")
                 return
-        pred = cond.cmp_op("==", type(cond)(0), name="assert_cmp")
-        with self.bld.if_else(pred):
+        pred = cond.cmp_op("==", type(cond)(cond.type(0)), name="assert_cmp")
+        with self.bld.if_then(pred):
             bld_assert(msg)
 
     def gen_untrans_panic_call(self, addr: int, f: ir.Function):
