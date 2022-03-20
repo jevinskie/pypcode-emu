@@ -388,6 +388,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     regs_dump_alias: ir.Function
     inline: bool
     assertions: bool
+    debugtrap: ir.Function
 
     def __init__(
         self,
@@ -451,6 +452,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.untrans_panic = self.gen_utrans_panic_decl()
         self.instr_cb, self.op_cb = self.gen_cb_decls()
         self.regs_dump, self.regs_dump_alias = self.gen_regs_dump_decls()
+
+        debugtrap_t = ir.FunctionType(void, [])
+        self.debugtrap = self.m.declare_intrinsic("llvm.debugtrap", fnty=debugtrap_t)
 
         self.gen_text_addrs()
         self.gen_addr2bb()
@@ -724,7 +728,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.bld.cbranch(cond_v, true_bb, false_bb)
             return tgt, True
         else:
-            self.gen_bb_caller_call(tgt, tail=False)
+            self.gen_bb_caller_call(tgt, tail=True)
             return None, True
 
     def handle_branchind(self, op: PcodeOp):
@@ -739,15 +743,17 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def handle_callind(self, op: PcodeOp):
         # FIXME: constexpr
-        self.gen_bb_caller_call(op.a(), tail=False, ret=False)
-        return None, False
+        self.gen_bb_caller_call(op.a(), tail=True)
+        return None, True
 
     def handle_callother(self, op: PcodeOp):
         raise NotImplementedError
 
     def gen_bb_caller(self) -> ir.Function:
         fty = ir.FunctionType(void, [self.iptr])
-        f = ir.Function(self.m, ftype=fty, name="bb_caller")
+        f = ir.Function(self.m, ftype=fty, name="bb_caller_int")
+        f.linkage = "internal"
+        f.calling_convention = "tailcc"
         if self.inline:
             f.attributes.add("alwaysinline")
         bb = f.append_basic_block("entry")
@@ -756,10 +762,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.position_at_end(bb)
         text_start = self.int_t(self.iptr(self.exec_start))
         text_end = self.int_t(self.iptr(self.exec_end))
+        ret_addr = self.int_t(self.iptr(self.ret_addr))
 
         # trace
-        # if self.trace:
-        #     self.gen_printf("bb_caller() to 0x%x\n", bb_addr)
+        if self.trace:
+            self.gen_printf("bb_caller() to 0x%x\n", bb_addr)
+
+        # final return check
+        is_final_return = ret_addr.cmp_op("==", bb_addr, name="is_final_return")
+        with self.bld.if_then(is_final_return):
+            self.bld.ret_void()
 
         # bounds check
         not_under = bb_addr.cmp_op(">=", text_start, name="bb_addr_not_under")
@@ -786,8 +798,17 @@ class LLVMELFLifter(ELFPCodeEmu):
             name="bb_fptr_ptr",
         )
         bb_fptr = self.bld.load(bb_fptr_ptr, name="bb_fptr")
-        call = self.bld.call(bb_fptr, [], tail=True, name="bb_caller")
+        call = self.bld.call(bb_fptr, [], tail=True, cconv="tailcc", name="bb_caller")
         self.bld.ret_void()
+
+        ef = ir.Function(self.m, ftype=fty, name="bb_caller")
+        bb = ef.append_basic_block("entry")
+        bb_addr = self.int_t(ef.args[0])
+        bb_addr.name = "bb_addr"
+        self.bld.position_at_end(bb)
+        self.bld.call(f, [bb_addr], tail=True, name="bb_caller_int")
+        self.bld.ret_void()
+
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal, tail: bool = True, ret: bool = True):
@@ -921,6 +942,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         op_cb = ir.Function(self.m, op_cb_t, "op_cb")
         return instr_cb, op_cb
 
+    def gen_debugtrap(self):
+        self.bld.call(self.debugtrap, [], name="debugtrap")
+
     def gen_utrans_panic_decl(self):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
         untrans_panic_t.args[0].name = "addr"
@@ -964,6 +988,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             )
             self.gen_regs_dump_alias_call()
             self.gen_printf("\n")
+            self.gen_debugtrap()
             self.gen_exit_call(-42)
 
         if cond.is_const:
@@ -1047,12 +1072,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def lift(self):
-        self.lift_demo()
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
         for addr in self.text_addrs_sentinel:
             f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
             f.linkage = "internal"
-            f.calling_convention = "fastcc"
+            f.calling_convention = "tailcc"
             if self.inline:
                 f.attributes.add("alwaysinline")
             self.addr2bb[self.addr2bb_idx(addr)] = f
@@ -1068,23 +1092,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
         self.compile(opt=self.opt_level, asan=self.asan)
-
-    def lift_demo(self):
-        # Create some useful types
-        double = ir.DoubleType()
-        fnty = ir.FunctionType(double, (double, double))
-
-        # and declare a function named "fpadd" inside it
-        func = ir.Function(self.m, fnty, name="fpadd")
-
-        # Now implement the function
-        bb = func.append_basic_block(name="entry")
-        a, b = func.args
-        a.name = "a"
-        b.name = "b"
-        self.bld.position_at_end(bb)
-        result = self.bld.fadd(a, b, name="res")
-        self.bld.ret(result)
 
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))

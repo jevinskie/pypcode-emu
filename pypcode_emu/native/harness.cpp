@@ -26,12 +26,7 @@ int main(int argc, const char **argv) {
     setup_mem();
     lifted_init();
     lifted_run();
-    fmt::print("pc: {:#010x}\n", regs.pc);
-
-    double a = 243.0;
-    double b = 42.0;
-    double c = fpadd(a, b);
-    fmt::print("fpadd({:f}, {:f}) = {:f}\n", a, b, c);
+    fmt::print("pc: {:#010x} res: {:#010x}\n", regs.pc, regs.r3);
 
     return 0;
 }
