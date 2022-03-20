@@ -183,7 +183,7 @@ class IntVal(ObjectProxy):
             c_func = getattr(self.conc, dunder_op_name)
             c = c_func(other.conc)
             return type(self)(val, space=self.cmn_space(other), concrete=c)
-        llvm_name = llvm_name or pretty_op_name
+        llvm_name = llvm_name or op_name
         op_bld_func = getattr(self.ctx.bld, llvm_name)
         name = name or op_name
         return type(self)(
@@ -738,10 +738,24 @@ class LLVMELFLifter(ELFPCodeEmu):
         fty = ir.FunctionType(void, [self.iptr])
         f = ir.Function(self.m, ftype=fty, name="bb_caller")
         bb = f.append_basic_block("entry")
-        bb_addr = f.args[0]
+        bb_addr = self.int_t(f.args[0])
         bb_addr.name = "bb_addr"
         self.bld.position_at_end(bb)
-        text_start = self.iptr(self.exec_start)
+        text_start = self.int_t(self.iptr(self.exec_start))
+        text_end = self.int_t(self.iptr(self.exec_end))
+
+        # bounds check
+        not_under = bb_addr.cmp_op(">=", text_start, name="bb_addr_not_under")
+        not_over = bb_addr.cmp_op("<", text_end, name="bb_addr_not_over")
+        self.gen_assert(
+            not_under & not_over,
+            "bb_addr 0x%x is out of addr2bb range of 0x%x to 0x%x",
+            bb_addr,
+            text_start,
+            text_end,
+        )
+
+        # access
         off_bytes = self.bld.sub(bb_addr, text_start, name="off_bytes")
         nbits_shift = int(math.log2(self.instr_len))
         assert math.log2(self.instr_len) == nbits_shift
@@ -910,21 +924,22 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_exit_call(self, status: int):
         self.bld.call(self.exit, [i32(status)], name="exit_call")
 
-    def gen_assert(self, cond: IntVal, msg: str):
-        def bld_assert(m, kind="ASSERTION"):
+    def gen_assert(self, cond: IntVal, fmt: str, *args):
+        def bld_assert(f, *args, kind="ASSERTION"):
             self.gen_printf_call(
-                f"\n{cf.red}{kind}:{cf.reset}\n\n{cf.deepPink}{msg}{cf.reset}\n",
+                f"\n{cf.red}{kind}:{cf.reset}\n\n{cf.deepPink}{f}{cf.reset}\n\n",
+                *args,
                 name="assert_printf",
             )
             self.gen_exit_call(-42)
 
         if cond.is_const:
             if not cond.conc:
-                bld_assert(msg, kind="COMPILE-TIME ASSERTION")
+                bld_assert(fmt, *args, kind="COMPILE-TIME ASSERTION")
                 return
         pred = cond.cmp_op("==", type(cond)(cond.type(0)), name="assert_cmp")
         with self.bld.if_then(pred):
-            bld_assert(msg)
+            bld_assert(fmt, *args)
 
     def gen_untrans_panic_call(self, addr: int, f: ir.Function):
         bb = f.append_basic_block("entry")
@@ -984,16 +999,13 @@ class LLVMELFLifter(ELFPCodeEmu):
             inst_addr = instr.address.offset
             self.dump(instr)
 
-            num_ops = len(instr.ops)
             for i, op in enumerate(instr.ops):
-                print(f"i: {i} order: {op.seq.order} uniq: {op.seq.uniq}")
                 assert i == op.seq.uniq
                 self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
                 if self.trace:
                     if i == 0:
                         self.gen_instr_cb_call(addr, instr)
                     self.gen_op_cb_call(addr, op)
-                self.gen_assert(self.int_t(i8(0)), "uhoh!")
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]
