@@ -1004,6 +1004,9 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         if cond.is_const:
             if not cond.conc:
+                raise AssertionError(
+                    f"COMPILE-TIME ASSERTION: cond: {cond} fmt: {fmt} args: {' '.join(map(str, args))}"
+                )
                 bld_assert(fmt, *args, kind="COMPILE-TIME ASSERTION")
                 return
         pred = cond.cmp_op("==", type(cond)(cond.type(0)), name="assert_cmp")
