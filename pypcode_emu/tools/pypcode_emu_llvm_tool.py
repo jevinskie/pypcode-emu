@@ -13,6 +13,8 @@ def real_main(args):
         opt=args.O,
         trace=args.trace,
         arg0=args.arg0,
+        inline=args.inline,
+        assertions=args.assertions,
     )
     lifter.lift()
     # try:
@@ -36,8 +38,14 @@ def main() -> int:
         help="Argument 0",
         metavar="ARG0",
     )
+    parser.add_argument("-t", "--trace", help="Enable tracing", action="store_true")
+    parser.add_argument("-i", "--inline", help="Enable inlining", action="store_true")
     parser.add_argument(
-        "-t", "--trace", default=False, help="Enable tracing", action="store_true"
+        "-A",
+        "--no-assert",
+        dest="assertions",
+        help="Disable Assertions",
+        action="store_false",
     )
     parser.add_argument("--asan", help="Enable address sanitizer", action="store_true")
     parser.add_argument(

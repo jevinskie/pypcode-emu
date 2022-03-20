@@ -386,6 +386,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     exit: ir.Function
     regs_dump: ir.Function
     regs_dump_alias: ir.Function
+    inline: bool
+    assertions: bool
 
     def __init__(
         self,
@@ -398,6 +400,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         opt: str = "z",
         trace: bool = False,
         arg0: int = 0,
+        inline: bool = False,
+        assertions: bool = True,
     ):
         self.instr_len = instr_len
         assert self.instr_len == 4
@@ -412,6 +416,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.asan = asan
         self.opt_level = opt
         self.trace = trace
+        self.inline = inline
+        self.assertions = assertions
 
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
@@ -742,6 +748,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_bb_caller(self) -> ir.Function:
         fty = ir.FunctionType(void, [self.iptr])
         f = ir.Function(self.m, ftype=fty, name="bb_caller")
+        if self.inline:
+            f.attributes.add("alwaysinline")
         bb = f.append_basic_block("entry")
         bb_addr = self.int_t(f.args[0])
         bb_addr.name = "bb_addr"
@@ -774,6 +782,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_fptr_ptr = self.bld.gep(
             self.addr2bb_gv,
             [self.iptr(0), off_iptrs],
+            inbounds=True,
             name="bb_fptr_ptr",
         )
         bb_fptr = self.bld.load(bb_fptr_ptr, name="bb_fptr")
@@ -944,6 +953,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.call(self.exit, [i32(status)], name="exit_call")
 
     def gen_assert(self, cond: IntVal, fmt: str, *args):
+        if not self.assertions:
+            return
+
         def bld_assert(f, *args, kind="ASSERTION"):
             self.gen_printf(
                 f"\n{cf.red}{kind}:{cf.reset}\n\n{cf.deepPink}{f}{cf.reset}\n\n",
@@ -1041,6 +1053,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
             f.linkage = "internal"
             f.calling_convention = "fastcc"
+            if self.inline:
+                f.attributes.add("alwaysinline")
             self.addr2bb[self.addr2bb_idx(addr)] = f
         translated_bbs = set()
         for addr in addrs:
