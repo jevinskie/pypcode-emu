@@ -720,11 +720,13 @@ class LLVMELFLifter(ELFPCodeEmu):
             name="op_cb_call",
         )
 
-    def gen_printf_call(self, fmt: str, *args) -> ir.CallInstr:
+    def gen_printf_call(
+        self, fmt: str, *args, name: Optional[str] = None
+    ) -> ir.CallInstr:
         def fix_ptr_fmt(match: re.Match):
             if match.group(0):
                 return "0x%08x" if self.bitness == 32 else "0x%016lx"
-            match.string
+            return match.string
 
         fmt = re.sub(PRINTF_PTR_RE, fix_ptr_fmt, fmt)
         fmt_val = self.strpool[fmt]
@@ -736,7 +738,8 @@ class LLVMELFLifter(ELFPCodeEmu):
                 args[i] = self.strpool[args[i]]
             if isinstance(args[i], int):
                 args[i] = i32(args[i])
-        return self.bld.call(self.printf, [fmt, *args], name="printf")
+        name = name or "printf"
+        return self.bld.call(self.printf, [fmt, *args], name=name)
 
     def gen_cb_decls(self):
         instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr])
@@ -824,7 +827,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     if i == 0:
                         self.gen_instr_cb_call(addr, inst_addr)
                     self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
-                self.gen_printf_call("hello %s %p\n", "world", "world")
+                self.gen_printf_call("hello %s 0x%lx\n", "world", "world")
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]
