@@ -7,8 +7,8 @@ import platform
 import re
 from typing import Callable, ClassVar, Optional, Type, Union
 
+import colorful as cf
 from bidict import bidict
-from colorama import Back, Fore, Style
 from icecream import ic
 from llvmlite import ir
 from more_itertools import chunked
@@ -60,7 +60,15 @@ void = ir.VoidType()
 
 size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
 
-PRINTF_FMT_RE = re.compile("(%(p|d|u|x|s))|(%%)")
+PRINTF_FMT_RE = re.compile("(%(p|d|u|x|s))|(0x%x)|(%%)")
+
+cf.use_true_colors()
+cf.update_palette(
+    {
+        "slateblue": "#6A5ACD",
+        "palegreen": "#98FB98",
+    }
+)
 
 
 def ibN(nbytes: int) -> ir.Type:
@@ -83,9 +91,16 @@ class IntVal(ObjectProxy):
         self._self_space = space
         if concrete is None and self.is_const:
             try:
-                concrete = uintN(self.size)(int(self.constant))
+                cval = int(self.constant)
+                if isinstance(self.type, ir.IntType):
+                    concrete = uintN(self.type.width // 8)(cval)
+                elif isinstance(self.type, ir.PointerType):
+                    concrete = uintN(self.size)(cval)
+                else:
+                    raise TypeError(f"IR type: {self.type} self: {self.m}")
             except ValueError:
                 pass
+
         self._self_conc = concrete
 
     @classmethod
@@ -539,7 +554,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             bswap_v = self.gen_bswap(v)
             self.bld.store(bswap_v, store_ptr)
             if self.trace:
-                self.gen_printf_call(f"*%p = 0x%x\n", store_ptr, v)
+                self.gen_printf_call(f"*%p = 0x%x\n", self.int_t(store_ptr), v)
 
         return store_setter
 
@@ -561,7 +576,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             load_v = self.bld.load(load_ptr, name="load")
             res = self.int_t(self.gen_bswap(load_v), space=self.ram_space)
             if self.trace:
-                self.gen_printf_call(f"0x%x = *%p\n", res, load_ptr)
+                self.gen_printf_call(f"0x%x = *%p\n", res, self.int_t(load_ptr))
             return res
 
         return load_getter
@@ -815,7 +830,13 @@ class LLVMELFLifter(ELFPCodeEmu):
                 elif ty_str == "x":
                     assert not arg.type.is_pointer
                     res = self.printf_fmt_spec(arg.type, x=True)
-                res = f"%s{res}{Style.RESET_ALL}"
+                res = f"%s{res}{cf.reset}"
+                idx_color.append(match_num)
+            elif match.group(3):
+                # 0x%x
+                assert not arg.type.is_pointer
+                res = self.printf_fmt_spec(arg.type, x=True)
+                res = f"%s0x{res}{cf.reset}"
                 idx_color.append(match_num)
             else:
                 res = match.string
@@ -830,7 +851,9 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         for arg_idx in arg_ins_idx:
             cond_v = args[arg_idx]
-            color_v = cond_v.cmov(self.strpool[Fore.GREEN], self.strpool[Fore.RED])
+            color_v = cond_v.cmov(
+                self.strpool[str(cf.palegreen)], self.strpool[str(cf.slateblue)]
+            )
             args.insert(arg_idx, color_v)
 
         if isinstance(fmt, str):

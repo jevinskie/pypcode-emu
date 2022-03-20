@@ -4,8 +4,11 @@ from typing import Type
 from bidict import bidict
 from nativetypes import *
 
-size2uintN = bidict({1: uint8, 2: uint16, 4: uint32, 8: uint64})
-size2intN = bidict({1: int8, 2: int16, 4: int32, 8: int64})
+uint1 = nint_type("uint1", 1, False)
+int1 = nint_type("int1", 1, True)
+
+size2uintN = bidict({0: uint1, 1: uint8, 2: uint16, 4: uint32, 8: uint64})
+size2intN = bidict({1: int1, 2: int16, 4: int32, 8: int64})
 
 
 def uintN(nbytes: int) -> Type[nint]:
