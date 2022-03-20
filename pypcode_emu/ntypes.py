@@ -8,11 +8,11 @@ size2uintN = bidict({1: uint8, 2: uint16, 4: uint32, 8: uint64})
 size2intN = bidict({1: int8, 2: int16, 4: int32, 8: int64})
 
 
-def uintN(nbytes: int) -> nint:
+def uintN(nbytes: int) -> Type[nint]:
     return size2uintN[nbytes]
 
 
-def intN(nbytes: int) -> nint:
+def intN(nbytes: int) -> Type[nint]:
     return size2intN[nbytes]
 
 

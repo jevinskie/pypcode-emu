@@ -5,7 +5,7 @@ import math
 import os
 import platform
 import re
-from typing import Callable, ClassVar, Optional, Union
+from typing import Callable, ClassVar, Optional, Type, Union
 
 from bidict import bidict
 from colorama import Back, Fore, Style
@@ -75,6 +75,7 @@ class IntVal(ObjectProxy):
     def __init__(
         self, v, space: Optional[AddrSpace] = None, concrete: Optional[nint] = None
     ):
+        assert not isinstance(v, ObjectProxy)
         if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
             assert False
             v = v.w
@@ -88,7 +89,7 @@ class IntVal(ObjectProxy):
         self._self_conc = concrete
 
     @classmethod
-    def class_with_lifter(cls, lifter: LLVMELFLifter) -> type:
+    def class_with_lifter(cls, lifter: LLVMELFLifter) -> Type[IntVal]:
         return type("BoundIntVal", (IntVal,), {"ctx": lifter})
 
     @property
@@ -113,7 +114,9 @@ class IntVal(ObjectProxy):
     @property
     def size(self) -> int:
         assert self.type is not i1
-        return {i8: 1, i16: 2, i32: 4, i64: 8}[self.type]
+        return {i8: 1, i16: 2, i32: 4, i64: 8, ir.PointerType: self.ctx.iptr.size}[
+            self.type
+        ]
 
     @property
     def is_const(self) -> bool:
@@ -228,6 +231,14 @@ class IntVal(ObjectProxy):
             self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"),
             space=self.cmn_space(other),
         )
+
+    def bitcast(self, new_ty: ir.Type) -> IntVal:
+        if self.is_const:
+            val = self.w.bitcast(new_ty)
+            c = nint(self.conc.v, new_ty.width, self.conc.s)
+            return type(self)(val, space=self.space, concrete=c)
+        else:
+            return type(self)(self.bld.bitcast(new_ty), space=self.space)
 
     def asr(self, nbits: IntVal) -> IntVal:
         return self.bin_op(nbits, "asr", llvm_name="ashr")
