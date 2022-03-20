@@ -8,6 +8,7 @@ import re
 from typing import Callable, ClassVar, Optional, Union
 
 from bidict import bidict
+from colorama import Back, Fore, Style
 from icecream import ic
 from llvmlite import ir
 from more_itertools import chunked
@@ -75,6 +76,7 @@ class IntVal(ObjectProxy):
         self, v, space: Optional[AddrSpace] = None, concrete: Optional[nint] = None
     ):
         if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
+            assert False
             v = v.w
         super().__init__(v)
         self._self_space = space
@@ -384,10 +386,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.m = self.get_init_mod()
         self.intrinsics = Intrinsics(self.m)
         self.bld = ir.IRBuilder()
-        self.strpool = CStringPool(self.m)
+        int_t = IntVal.class_with_lifter(self)
+        self.strpool = CStringPool(self.m, int_t)
         self.printf = self.gen_printf_decl()
         self.bb_bbs = None
-        int_t = IntVal.class_with_lifter(self)
 
         super().__init__(elf_path, entry=entry, int_t=int_t)
         num_exec_segs = 0
@@ -485,7 +487,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         for rname in self.ctx.get_register_names():
             reg = self.ctx.get_register(rname)
             setter = self.setter_for_varnode(reg, UniqueBuf())
-            setter(ibN(reg.size)(init.get(rname, 0)))
+            setter(self.int_t(ibN(reg.size)(init.get(rname, 0))))
         self.bld.ret_void()
 
     def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
@@ -776,10 +778,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         args = [*args]
         # (%p)|(%d)|(%u)|(%x)|(%s)|(%%)
         match_num = 0
+        idx_color = []
 
         def fix_fmt(match: re.Match):
-            nonlocal match_num, args
-            arg = self.int_t(args[match_num])
+            nonlocal match_num, args, idx_color
+            arg = args[match_num]
             if match.group(1):
                 ty_str = match.group(2)
                 if ty_str == "p":
@@ -801,14 +804,24 @@ class LLVMELFLifter(ELFPCodeEmu):
                 elif ty_str == "x":
                     assert not arg.type.is_pointer
                     res = self.printf_fmt_spec(arg.type, x=True)
+                res = f"%s{res}{Style.RESET_ALL}"
+                idx_color.append(match_num)
             else:
                 res = match.string
             args[match_num] = arg
             match_num += 1
+
             return res
 
         fmt = re.sub(PRINTF_FMT_RE, fix_fmt, fmt)
-        fmt_val = self.strpool[fmt]
+
+        arg_ins_idx = [idx + off for idx, off in zip(idx_color, range(len(idx_color)))]
+
+        for arg_idx in arg_ins_idx:
+            cond_v = args[arg_idx]
+            color_v = cond_v.cmov(self.strpool[Fore.GREEN], self.strpool[Fore.RED])
+            args.insert(arg_idx, color_v)
+
         if isinstance(fmt, str):
             fmt = self.strpool[fmt]
         for i in range(len(args)):

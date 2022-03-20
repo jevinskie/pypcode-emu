@@ -569,13 +569,10 @@ class PCodeEmu:
 
     @staticmethod
     def desc(insn: Translation) -> str:
-        return "%08x/%d[%d]: %s %s" % (
-            insn.address.offset,
-            insn.length,
-            insn.length_delay,
-            insn.asm_mnem,
-            insn.asm_body,
-        )
+        res = f"{insn.address.offset:#010x}[{insn.length:d}"
+        res += f",{insn.length_delay}" if insn.length_delay else ""
+        res += f"] {insn.asm_mnem} {insn.asm_body}"
+        return res
 
     @classmethod
     def dump(cls, instr: Union[Translation, Sequence[Translation]]):
