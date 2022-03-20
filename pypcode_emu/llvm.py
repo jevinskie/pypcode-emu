@@ -364,6 +364,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     instr_len: int
     regs_t: ir.IdentifiedStructType
     regs_gv: ir.GlobalVariable
+    regs_lv: ir.NamedValue
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
     mem_lv: ir.LoadInstr
@@ -508,6 +509,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_t = self.m.context.get_identified_type("regs_t")
         self.regs_t.set_body(*struct_mem_types)
         self.regs_gv = ir.GlobalVariable(self.m, self.regs_t, "regs")
+        self.regs_lv = None
 
         # FIXME rename this function
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
@@ -515,7 +517,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.mem_lv = None
 
     def gen_addr2bb(self):
-        self.bb_t = ir.FunctionType(void, [])
+        self.bb_t = ir.FunctionType(void, [self.regs_t.as_pointer()])
         self.addr2bb_t = ir.ArrayType(self.bb_t.as_pointer(), len(self.addr2bb))
         self.addr2bb_gv = ir.GlobalVariable(self.m, self.addr2bb_t, "addr2bb")
         self.addr2bb_gv.global_constant = True
@@ -750,7 +752,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         raise NotImplementedError
 
     def gen_bb_caller(self) -> ir.Function:
-        fty = ir.FunctionType(void, [self.iptr])
+        fty = ir.FunctionType(void, [self.iptr, self.regs_t.as_pointer()])
         f = ir.Function(self.m, ftype=fty, name="bb_caller_int")
         f.linkage = "internal"
         f.calling_convention = "tailcc"
@@ -759,6 +761,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb = f.append_basic_block("entry")
         bb_addr = self.int_t(f.args[0])
         bb_addr.name = "bb_addr"
+        self.regs_lv = self.int_t(f.args[1])
+        self.regs_lv.name = "regs"
         self.bld.position_at_end(bb)
         text_start = self.int_t(self.iptr(self.exec_start))
         text_end = self.int_t(self.iptr(self.exec_end))
@@ -798,15 +802,20 @@ class LLVMELFLifter(ELFPCodeEmu):
             name="bb_fptr_ptr",
         )
         bb_fptr = self.bld.load(bb_fptr_ptr, name="bb_fptr")
-        call = self.bld.call(bb_fptr, [], tail=True, cconv="tailcc", name="bb_caller")
+        self.bld.call(
+            bb_fptr, [self.regs_lv], tail=True, cconv="tailcc", name="bb_caller"
+        )
         self.bld.ret_void()
 
-        ef = ir.Function(self.m, ftype=fty, name="bb_caller")
+        # external interface
+        efty = ir.FunctionType(void, [self.iptr])
+        ef = ir.Function(self.m, ftype=efty, name="bb_caller")
         bb = ef.append_basic_block("entry")
         bb_addr = self.int_t(ef.args[0])
         bb_addr.name = "bb_addr"
         self.bld.position_at_end(bb)
-        self.bld.call(f, [bb_addr], tail=True, name="bb_caller_int")
+        self.bld.load(self.regs_gv, name="regs_val")
+        self.bld.call(f, [bb_addr, self.regs_gv], tail=True, name="bb_caller_int")
         self.bld.ret_void()
 
         return f
@@ -815,12 +824,14 @@ class LLVMELFLifter(ELFPCodeEmu):
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
-                [],
+                [self.regs_lv],
                 tail=tail,
                 name="bb_call_direct",
             )
         else:
-            call = self.bld.call(self.bb_caller, [bb_addr], tail=tail, name="bb_call")
+            call = self.bld.call(
+                self.bb_caller, [bb_addr, self.regs_lv], tail=tail, name="bb_call"
+            )
         if ret:
             self.bld.ret_void()
 
@@ -1077,6 +1088,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
             f.linkage = "internal"
             f.calling_convention = "tailcc"
+            regs_arg = self.int_t(f.args[0])
+            regs_arg.name = "regs"
             if self.inline:
                 f.attributes.add("alwaysinline")
             self.addr2bb[self.addr2bb_idx(addr)] = f
