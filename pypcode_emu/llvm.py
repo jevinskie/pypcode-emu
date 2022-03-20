@@ -4,6 +4,7 @@ import importlib.resources
 import math
 import os
 import platform
+import re
 from typing import Callable, ClassVar, Optional, Union
 
 from bidict import bidict
@@ -57,6 +58,8 @@ i64 = ir.IntType(64)
 void = ir.VoidType()
 
 size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
+
+PRINTF_PTR_RE = re.compile("(%p)|(%%)")
 
 
 def ibN(nbytes: int) -> ir.Type:
@@ -373,6 +376,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     opt_level: str
     trace: bool
     strpool: CStringPool
+    printf: ir.Function
 
     def __init__(
         self,
@@ -425,6 +429,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.isz = i64
 
         self.untrans_panic = self.gen_utrans_panic_decl()
+        self.printf = self.gen_printf_decl()
         self.instr_cb, self.op_cb = self.gen_cb_decls()
 
         self.gen_text_addrs()
@@ -737,6 +742,24 @@ class LLVMELFLifter(ELFPCodeEmu):
             name="op_cb_call",
         )
 
+    def gen_printf_call(self, fmt: str, *args) -> ir.CallInstr:
+        def fix_ptr_fmt(match: re.Match):
+            if match.group(0):
+                return "0x%08x" if self.bitness == 32 else "0x%016lx"
+            match.string
+
+        fmt = re.sub(PRINTF_PTR_RE, fix_ptr_fmt, fmt)
+        fmt_val = self.strpool[fmt]
+        args = [*args]
+        if isinstance(fmt, str):
+            fmt = self.strpool[fmt]
+        for i in range(len(args)):
+            if isinstance(args[i], str):
+                args[i] = self.strpool[args[i]]
+            if isinstance(args[i], int):
+                args[i] = i32(args[i])
+        return self.bld.call(self.printf, [fmt, *args], name="printf")
+
     def gen_cb_decls(self):
         instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr])
         instr_cb = ir.Function(self.m, instr_cb_t, "instr_cb")
@@ -748,6 +771,12 @@ class LLVMELFLifter(ELFPCodeEmu):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
         untrans_panic_t.args[0].name = "addr"
         return ir.Function(self.m, untrans_panic_t, "untrans_panic")
+
+    def gen_printf_decl(self):
+        printf_t = ir.FunctionType(i32, [i8.as_pointer()])
+        printf_t.args[0].name = "fmt"
+        printf_t.var_arg = True
+        return ir.Function(self.m, printf_t, "printf")
 
     def gen_untrans_panic_call(self, addr: int, f: ir.Function):
         bb = f.append_basic_block("entry")
@@ -817,6 +846,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     if i == 0:
                         self.gen_instr_cb_call(addr, inst_addr)
                     self.gen_op_cb_call(addr, inst_addr, i, op.opcode.value)
+                self.gen_printf_call("hello %s %p\n", "world", "world")
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if not was_terminated:
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]

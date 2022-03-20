@@ -20,5 +20,6 @@ class CStringPool:
         gv.global_constant = True
         gv.linkage = "internal"
         gv.initializer = ir.Constant(buf_ty, bytearray(buf))
-        self._pool[item] = gv
-        return gv
+        bc_gv = gv.bitcast(ir.IntType(8).as_pointer())
+        self._pool[item] = bc_gv
+        return bc_gv
