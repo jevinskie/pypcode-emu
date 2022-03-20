@@ -404,6 +404,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exec_start = 0x1_0000_0000
         self.exec_end = 0x0000_0000
 
+        self.trace_pad = " " * 48
+
         self.bb_override = bb_override
         self.asan = asan
         self.opt_level = opt
@@ -554,7 +556,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             bswap_v = self.gen_bswap(v)
             self.bld.store(bswap_v, store_ptr)
             if self.trace:
-                self.gen_printf_call(f"*%p = 0x%x\n", self.int_t(store_ptr), v)
+                self.gen_printf_call(
+                    f"{self.trace_pad}*%p = 0x%x\n", self.int_t(store_ptr), v
+                )
 
         return store_setter
 
@@ -576,7 +580,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             load_v = self.bld.load(load_ptr, name="load")
             res = self.int_t(self.gen_bswap(load_v), space=self.ram_space)
             if self.trace:
-                self.gen_printf_call(f"0x%x = *%p\n", res, self.int_t(load_ptr))
+                self.gen_printf_call(
+                    f"{self.trace_pad}0x%x = *%p\n", res, self.int_t(load_ptr)
+                )
             return res
 
         return load_getter
@@ -591,7 +597,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             def get_unique() -> IntVal:
                 res = unique[vn.offset : vn.offset + vn.size]
                 if self.trace:
-                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                    self.gen_printf_call(f"{self.trace_pad}0x%x = {vn}\n", res)
                 return res
 
             return get_unique
@@ -612,7 +618,11 @@ class LLVMELFLifter(ELFPCodeEmu):
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
                 if self.trace:
-                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                    pretty_name = self.alias_reg(vn.get_register_name())
+                    self.gen_printf_call(
+                        f"{self.trace_pad}0x%x = {vn} ({cf.orange}{pretty_name}{cf.reset})\n",
+                        res,
+                    )
                 return res
 
             return get_register
@@ -633,7 +643,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 bswapped = self.gen_bswap(load_val)
                 res = self.int_t(bswapped, space=self.ram_space)
                 if self.trace:
-                    self.gen_printf_call(f"0x%x = {vn}\n", res)
+                    self.gen_printf_call(f"{self.trace_pad}0x%x = {vn}\n", res)
                 return res
 
             return get_ram
@@ -650,7 +660,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_unique(v: IntVal) -> None:
                 unique[vn.offset : vn.offset + vn.size] = v
                 if self.trace:
-                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
+                    self.gen_printf_call(f"{self.trace_pad}{vn} = 0x%x\n", v)
 
             return set_unique
         elif vn.space is self.const_space:
@@ -662,7 +672,11 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_register(v: IntVal) -> None:
                 self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
                 if self.trace:
-                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
+                    pretty_name = self.alias_reg(vn.get_register_name())
+                    self.gen_printf_call(
+                        f"{self.trace_pad}{vn} = 0x%x ({cf.orange}{pretty_name}{cf.reset})\n",
+                        v,
+                    )
 
             return set_register
         elif vn.space is self.ram_space:
@@ -681,7 +695,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
                 self.bld.store(bswapped, store_ptr)
                 if self.trace:
-                    self.gen_printf_call(f"{vn} = 0x%x\n", v)
+                    self.gen_printf_call(f"{self.trace_pad}{vn} = 0x%x\n", v)
 
             return set_ram
         else:
@@ -764,7 +778,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             [
                 self.iptr(bb),
                 self.iptr(inst.address.offset),
-                self.strpool[self.desc(inst)],
+                self.strpool[inst.asm_mnem],
+                self.strpool[inst.asm_body],
             ],
             name="inst_cb_call",
         )
@@ -775,7 +790,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             [
                 self.iptr(bb),
                 self.iptr(op.address),
-                i32(op.seq.order),
+                i32(op.seq.uniq),
                 i32(op.opcode.value),
                 self.strpool[str(op)],
             ],
@@ -867,7 +882,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         return self.bld.call(self.printf, [fmt, *args], name=name)
 
     def gen_cb_decls(self):
-        instr_cb_t = ir.FunctionType(void, [self.iptr, self.iptr, i8.as_pointer()])
+        instr_cb_t = ir.FunctionType(
+            void, [self.iptr, self.iptr, i8.as_pointer(), i8.as_pointer()]
+        )
         instr_cb = ir.Function(self.m, instr_cb_t, "instr_cb")
         op_cb_t = ir.FunctionType(
             void, [self.iptr, self.iptr, i32, i32, i8.as_pointer()]
@@ -946,8 +963,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             num_ops = len(instr.ops)
             for i, op in enumerate(instr.ops):
-                order = op.seq.order
-                print(f"i: {i} order: {order} uniq: {op.seq.uniq}")
+                print(f"i: {i} order: {op.seq.order} uniq: {op.seq.uniq}")
                 assert i == op.seq.uniq
                 self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
                 if self.trace:

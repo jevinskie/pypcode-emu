@@ -24,7 +24,7 @@ extern const uptr entry_point;
 
 void bb_caller(uptr addr);
 
-void instr_cb(uptr bb, uptr pc, const char *desc);
+void instr_cb(uptr bb, uptr pc, const char *asm_mnem, const char *asm_body);
 void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc);
 void untrans_panic(uptr pc);
 }
