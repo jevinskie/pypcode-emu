@@ -644,7 +644,11 @@ class LLVMELFLifter(ELFPCodeEmu):
                 if self.regs_lv.has_const_ops:
                     gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 else:
-                    gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
+                    gep = self.bld.gep(
+                        self.regs_lv,
+                        [i32(0), i32(ridx)],
+                        name=f"{self.alias_reg(rname)}_ld_ptr",
+                    )
                 res = self.int_t(
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
@@ -704,7 +708,11 @@ class LLVMELFLifter(ELFPCodeEmu):
                 if self.regs_lv.has_const_ops:
                     gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 else:
-                    gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
+                    gep = self.bld.gep(
+                        self.regs_lv,
+                        [i32(0), i32(ridx)],
+                        name=f"{self.alias_reg(rname)}_st_ptr",
+                    )
                 self.bld.store(v, gep)
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
@@ -784,6 +792,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_lv = self.int_t(f.args[2])
         self.regs_lv.name = "regs_ptr"
         self.regs_lv.attributes.add("nocapture")
+        self.regs_lv.attributes.add("noalias")
         self.bld.position_at_end(bb)
         text_start = self.int_t(self.iptr(self.exec_start))
         text_end = self.int_t(self.iptr(self.exec_end))
@@ -1099,6 +1108,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.mem_lv.name = "mem_ptr"
         self.regs_lv = self.int_t(f.args[1])
         self.regs_lv.name = "regs_ptr"
+        self.regs_lv.attributes.add("nocapture")
+        self.regs_lv.attributes.add("noalias")
         self.bld.position_at_end(entry_bb)
         self.mem_base_lv = self.bld.ptrtoint(self.mem_lv, i64, name="mem_base_int")
 
