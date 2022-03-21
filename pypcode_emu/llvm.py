@@ -510,7 +510,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_t.set_body(*struct_mem_types)
         self.regs_gv = ir.GlobalVariable(self.m, self.regs_t, "regs")
         self.regs_gv.align = 16
-        self.regs_lv = None
+        self.regs_lv = self.regs_gv
 
         # FIXME rename this function
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
@@ -631,7 +631,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
-                gep = self.regs_gv.gep([i32(0), i32(ridx)])
+                gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
+                # gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 res = self.int_t(
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
@@ -688,7 +689,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def set_register(v: IntVal) -> None:
-                self.bld.store(v, self.regs_gv.gep([i32(0), i32(ridx)]))
+                gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
+                self.bld.store(v, gep)
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     self.gen_printf(
@@ -764,6 +766,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_addr.name = "bb_addr"
         self.regs_lv = self.int_t(f.args[1])
         self.regs_lv.name = "regs"
+        by_val_attr = f"byval({self.regs_t})"
+        self.regs_lv.attributes._known |= frozenset([by_val_attr])
+        self.regs_lv.attributes.add(by_val_attr)
+        self.regs_lv.attributes.add("nocapture")
         self.bld.position_at_end(bb)
         text_start = self.int_t(self.iptr(self.exec_start))
         text_end = self.int_t(self.iptr(self.exec_end))
@@ -815,8 +821,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_addr = self.int_t(ef.args[0])
         bb_addr.name = "bb_addr"
         self.bld.position_at_end(bb)
-        self.bld.load(self.regs_gv, name="regs_val")
-        self.bld.call(f, [bb_addr, self.regs_gv], tail=True, name="bb_caller_int")
+        alloca = self.bld.alloca(self.regs_t, name="tmp_regs")
+        alloca.align = 16
+        greg_val = self.bld.load(self.regs_gv, name="gregs")
+        self.bld.store(greg_val, alloca)
+        self.bld.call(f, [bb_addr, alloca], tail=True, name="bb_caller_int")
         self.bld.ret_void()
 
         return f
