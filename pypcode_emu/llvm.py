@@ -139,6 +139,10 @@ class IntVal(ObjectProxy):
     def c(self) -> ir.Constant:
         return super(ir.Constant, self)
 
+    @property
+    def has_const_ops(self):
+        return isinstance(self, ir.values._ConstOpMixin)
+
     def sext(self, size: int) -> IntVal:
         if self.is_const:
             val = self.w.sext(ibN(size))
@@ -364,7 +368,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     instr_len: int
     regs_t: ir.IdentifiedStructType
     regs_gv: ir.GlobalVariable
-    regs_lv: ir.NamedValue
+    regs_lv: ir.Argument
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
     mem_lv: ir.LoadInstr
@@ -380,6 +384,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     bld: ir.IRBuilder
     bb_override: Optional[list[int]]
     asan: bool
+    msan: bool
     opt_level: str
     trace: bool
     strpool: CStringPool
@@ -399,6 +404,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         instr_len: int = 4,
         bb_override: Optional[list[int]] = None,
         asan: bool = False,
+        msan: bool = False,
         opt: str = "z",
         trace: bool = False,
         arg0: int = 0,
@@ -415,7 +421,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.trace_pad = " " * 48
 
         self.bb_override = bb_override
-        self.asan = asan
+        self.asan, self.msan = asan, msan
         self.opt_level = opt
         self.trace = trace
         self.inline = inline
@@ -508,7 +514,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         self.regs_t = self.m.context.get_identified_type("regs_t")
         self.regs_t.set_body(*struct_mem_types)
-        self.regs_gv = ir.GlobalVariable(self.m, self.regs_t, "regs")
+        self.regs_gv = self.int_t(ir.GlobalVariable(self.m, self.regs_t, "regs"))
         self.regs_gv.align = 16
         self.regs_lv = self.regs_gv
 
@@ -631,8 +637,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
-                gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
-                # gep = self.regs_lv.gep([i32(0), i32(ridx)])
+                if self.regs_lv.has_const_ops:
+                    gep = self.regs_lv.gep([i32(0), i32(ridx)])
+                else:
+                    gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
                 res = self.int_t(
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
@@ -689,7 +697,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def set_register(v: IntVal) -> None:
-                gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
+                if self.regs_lv.has_const_ops:
+                    gep = self.regs_lv.gep([i32(0), i32(ridx)])
+                else:
+                    gep = self.bld.gep(self.regs_lv, [i32(0), i32(ridx)])
                 self.bld.store(v, gep)
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
@@ -767,6 +778,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_lv = self.int_t(f.args[1])
         self.regs_lv.name = "regs"
         by_val_attr = f"byval({self.regs_t})"
+        # FIXME: hack around source level IR changes
         self.regs_lv.attributes._known |= frozenset([by_val_attr])
         self.regs_lv.attributes.add(by_val_attr)
         self.regs_lv.attributes.add("nocapture")
@@ -781,7 +793,9 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         # final return check
         is_final_return = ret_addr.cmp_op("==", bb_addr, name="is_final_return")
-        with self.bld.if_then(is_final_return):
+        with self.bld.if_then(is_final_return, likely=False):
+            tmp_regs_to_store = self.bld.load(self.regs_lv, name="tmp_regs_to_store")
+            self.bld.store(tmp_regs_to_store, self.regs_gv)
             self.bld.ret_void()
 
         # bounds check
@@ -1019,7 +1033,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 bld_assert(fmt, *args, kind="COMPILE-TIME ASSERTION")
                 return
         pred = cond.cmp_op("==", type(cond)(cond.type(0)), name="assert_cmp")
-        with self.bld.if_then(pred):
+        with self.bld.if_then(pred, likely=False):
             bld_assert(fmt, *args)
 
     def gen_untrans_panic_call(self, addr: int, f: ir.Function):
@@ -1116,7 +1130,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             bb_func = self.addr2bb[self.addr2bb_idx(addr)]
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
-        self.compile(opt=self.opt_level, asan=self.asan)
+        self.compile(opt=self.opt_level, asan=self.asan, msan=self.msan)
 
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))
@@ -1173,7 +1187,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             gen_reg_dump_func("regs_dump")
             gen_reg_dump_func("regs_dump_alias", alias_func=self.alias_reg)
 
-    def compile(self, opt: str = "z", asan: bool = False):
+    def compile(self, opt: str = "z", asan: bool = False, msan: bool = False):
         build_dir = Path("build")
         try:
             os.mkdir(build_dir)
@@ -1231,6 +1245,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             "-std=c++20",
             "-Wall",
             "-Wextra",
+            "-masm=intel",
             f"-O{opt}",
         ]
         LDFLAGS = []
@@ -1239,8 +1254,19 @@ class LLVMELFLifter(ELFPCodeEmu):
         PRETTY_CXXFLAGS = [*CXXFLAGS, "-Oz", "-g0"]
 
         if asan:
-            CXXFLAGS += ["-fsanitize=address"]
-            LDFLAGS += ["-fsanitize=address"]
+            CXXFLAGS += ["-fsanitize=address", "-fno-omit-frame-pointer"]
+            LDFLAGS += ["-fsanitize=address", "-fno-omit-frame-pointer"]
+        if msan:
+            CXXFLAGS += [
+                "-fsanitize=memory",
+                "-fsanitize-memory-track-origins=2",
+                "-fno-omit-frame-pointer",
+            ]
+            LDFLAGS += [
+                "-fsanitize=memory",
+                "-fsanitize-memory-track-origins=2",
+                "-fno-omit-frame-pointer",
+            ]
 
         CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
         CXX(*CXXFLAGS, "-c", "-o", harness_s, "-S", harness_cpp, "-g0")

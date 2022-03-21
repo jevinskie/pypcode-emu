@@ -10,6 +10,7 @@ def real_main(args):
         entry=args.entry,
         bb_override=args.bb_addr,
         asan=args.asan,
+        msan=args.msan,
         opt=args.O,
         trace=args.trace,
         arg0=args.arg0,
@@ -47,7 +48,8 @@ def main() -> int:
         help="Disable Assertions",
         action="store_false",
     )
-    parser.add_argument("--asan", help="Enable address sanitizer", action="store_true")
+    parser.add_argument("--asan", help="Enable Address Sanitizer", action="store_true")
+    parser.add_argument("--msan", help="Enable Memory Sanitizer", action="store_true")
     parser.add_argument(
         "-O", default="z", help="Optimization level", metavar="OPT_LEVEL"
     )
