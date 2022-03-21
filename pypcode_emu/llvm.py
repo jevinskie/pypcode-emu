@@ -33,6 +33,7 @@ from .ntypes import (
     uint64,
     uintN,
 )
+from .pcode_analysis import Liveness
 from .utils import gen_cmd
 
 real_print = print
@@ -1084,10 +1085,11 @@ class LLVMELFLifter(ELFPCodeEmu):
             instrs = self.translate(addr)
         except RuntimeError as e:
             return None
+        analyzed_instrs = Liveness(instrs)
         self.bb_bbs = {}
 
         prev_inst_last_bb = None
-        for instr in instrs:
+        for instr in analyzed_instrs.instrs:
             inst_addr = instr.address.offset
             for i in range(len(instr.ops) + 1):
                 bb = f.append_basic_block(f"pc_{inst_addr:#010x}_{i}")
@@ -1113,7 +1115,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.position_at_end(entry_bb)
         self.mem_base_lv = self.bld.ptrtoint(self.mem_lv, i64, name="mem_base_int")
 
-        for instr in instrs:
+        for instr in analyzed_instrs.instrs:
             inst_addr = instr.address.offset
             self.dump(instr)
 

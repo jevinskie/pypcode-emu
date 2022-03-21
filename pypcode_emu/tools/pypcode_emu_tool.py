@@ -15,7 +15,7 @@ def real_main(args):
         emu.entry,
         max_inst=args.max_inst,
         max_bytes=args.max_bytes,
-        bb_terminating=args.bb_terminating,
+        bb_nonlinear_terminating=args.bb_terminating,
     )
     emu.dump(instr)
 
