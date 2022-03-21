@@ -11,27 +11,25 @@ using namespace fmt;
 #include "lifted.h"
 #include "pcode-opcodes.h"
 
-u8 *mem;
-
-static void load_segs() {
+static void load_segs(u8 *mem) {
     for (int i = 0; i < num_segs; ++i) {
         memcpy(mem + segs[i].addr, segs[i].data, segs[i].size);
     }
 }
 
-void lifted_init() {
-    load_segs();
-    regs_init();
+void lifted_init(u8 *mem, regs_t *regs) {
+    load_segs(mem);
+    regs_init(regs);
 }
 
-void lifted_run() {
+void lifted_run(u8 *mem, regs_t *regs) {
     print("lifted_run begin\n");
-    bb_caller(entry_point);
+    bb_caller(entry_point, mem, regs);
     print("lifted_run end\n");
 }
 
 void untrans_panic(uptr pc) {
-    print(stderr, "Tried to run untranslated BB at {:#010x}\n", pc);
+    print(stderr, "Tried to run untranslated BB at {}\n", format(fg(color::red), "{:#010x}", pc));
     exit(-1);
 }
 

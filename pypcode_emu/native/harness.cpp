@@ -13,23 +13,25 @@
 extern "C" double fpadd(double a, double b);
 
 // 0x4000'0000'0000 makes asan happy
-void setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4000'0000'0000) {
+u8 *setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4000'0000'0000) {
 #if __has_feature(memory_sanitizer)
     preferred_addr = nullptr;
 #endif
-    mem = (u8 *)mmap(preferred_addr, size, PROT_READ | PROT_WRITE,
-                     MAP_ANONYMOUS | MAP_PRIVATE | (preferred_addr ? MAP_FIXED : 0), -1, 0);
+    u8 *mem = (u8 *)mmap(preferred_addr, size, PROT_READ | PROT_WRITE,
+                         MAP_ANONYMOUS | MAP_PRIVATE | (preferred_addr ? MAP_FIXED : 0), -1, 0);
     assert(mem);
     assert((uintptr_t)mem != UINTPTR_MAX);
+    return mem;
 }
 
 int main(int argc, const char **argv) {
     (void)argc;
     (void)argv;
 
-    setup_mem();
-    lifted_init();
-    lifted_run();
+    u8 *mem = setup_mem();
+    regs_t regs;
+    lifted_init(mem, &regs);
+    lifted_run(mem, &regs);
     fmt::print("pc: {:#010x} res: {:#010x}\n", regs.pc, regs.r3);
 
     return 0;
