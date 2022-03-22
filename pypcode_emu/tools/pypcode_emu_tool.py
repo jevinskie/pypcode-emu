@@ -1,23 +1,32 @@
 import argparse
 
+from path import Path
+
 from pypcode_emu.elf import BinaryError
-from pypcode_emu.emu import ELFPCodeEmu, PCodeEmu
+from pypcode_emu.emu import ELFPCodeEmu, RawBinaryPCodeEmu
 
 
 def real_main(args):
     try:
         emu = ELFPCodeEmu(args.binary, args.entry, arg0=args.arg0)
     except BinaryError:
-        emu = PCodeEmu(
-            args.spec, args.binary, args.base, int(args.entry, 0), arg0=args.arg0
+        args.entry = int(args.entry, 0)
+        if args.base is None:
+            args.base = args.entry
+        emu = RawBinaryPCodeEmu(
+            args.spec, args.binary, args.base, args.entry, arg0=args.arg0
         )
+        bin_sz = Path(args.binary).size
+        if args.max_bytes == 0:
+            args.max_bytes = bin_sz
+        assert args.max_bytes <= bin_sz
     instr = emu.translate(
         emu.entry,
         max_inst=args.max_inst,
         max_bytes=args.max_bytes,
         bb_nonlinear_terminating=args.bb_terminating,
     )
-    emu.dump(instr)
+    emu.dump(instr, pretty=args.pretty, raw=args.raw)
 
 
 def main() -> int:
@@ -51,6 +60,20 @@ def main() -> int:
         default=True,
         help="Don't stop translation at end of BB",
         metavar="BB",
+    )
+    parser.add_argument(
+        "-P",
+        "--no-pretty",
+        dest="pretty",
+        help="Disable P-Code pretty printing",
+        action="store_false",
+    )
+    parser.add_argument(
+        "-R",
+        "--no-raw",
+        dest="raw",
+        help="Disable P-Code raw printing",
+        action="store_false",
     )
     parser.add_argument(
         "-b", "--base", type=lambda x: int(x, 0), help="Base address", metavar="BASE"

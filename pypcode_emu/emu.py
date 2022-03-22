@@ -575,7 +575,12 @@ class PCodeEmu:
         return res
 
     @classmethod
-    def dump(cls, instr: Union[Translation, Sequence[Translation]]):
+    def dump(
+        cls,
+        instr: Union[Translation, Sequence[Translation]],
+        pretty: bool = True,
+        raw: bool = True,
+    ):
         if not isinstance(instr, collections.Sequence):
             instr = (instr,)
         for insn in instr:
@@ -583,15 +588,26 @@ class PCodeEmu:
             dprint(cls.desc(insn))
             dprint("-" * 80)
             for op in insn.ops:
-                dprint("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
-                dprint("\t\t%s" % str(op))
+                if pretty:
+                    dprint("%3d: %s" % (op.seq.uniq, PcodePrettyPrinter.fmt_op(op)))
+                if raw:
+                    if pretty:
+                        dprint("\t\t%s" % str(op))
+                    else:
+                        dprint(f"{op.seq.uniq:3d}: {op}")
 
 
 class RawBinaryPCodeEmu(PCodeEmu):
     def __init__(
-        self, spec: str, bin_path: str, base: int = 0, entry: int = 0, int_t: type = Int
+        self,
+        spec: str,
+        bin_path: str,
+        base: int = 0,
+        entry: int = 0,
+        arg0: int = 0,
+        int_t: type = Int,
     ):
-        super().__init__(spec, entry, int_t=int_t)
+        super().__init__(spec, entry, arg0=arg0, int_t=int_t)
         self.bin = open(bin_path, "rb").read()
         self.memcpy(base, self.bin)
 
