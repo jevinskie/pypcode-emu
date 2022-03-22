@@ -19,7 +19,7 @@ from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
 from .elf import PF, PT
-from .emu import ELFPCodeEmu, SpaceContext, UniqueBuf, ValBuf
+from .emu import ELFPCodeEmu, SpaceContext, ValBuf
 from .llvm_utils import CStringPool
 from .ntypes import (
     int8,
@@ -327,10 +327,12 @@ class RegBuf(ValBuf):
 
 class LLVMSpaceContext(SpaceContext):
     regs: RegBuf
+    written_regs: RegBuf
 
     def __init__(self):
         super().__init__()
         self.regs = RegBuf()
+        self.written_regs = RegBuf()
 
 
 class Intrinsics:
@@ -557,7 +559,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_lv = regs_ptr
         for rname in self.ctx.get_register_names():
             reg = self.ctx.get_register(rname)
-            setter = self.setter_for_varnode(reg, UniqueBuf())
+            setter = self.setter_for_varnode(reg)
             setter(self.int_t(ibN(reg.size)(init.get(rname, 0))))
         self.bld.ret_void()
 
@@ -660,6 +662,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
+                if (vn.offset, vn.size) in sctx.regs:
+                    return sctx.regs[vn.offset : vn.offset + vn.size]
                 if self.regs_lv.has_const_ops:
                     gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 else:
@@ -671,6 +675,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 res = self.int_t(
                     self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
                 )
+                sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     self.gen_printf(
@@ -726,6 +731,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def set_register(v: IntVal) -> None:
+                sctx.regs[vn.offset : vn.offset + vn.size] = v
+                sctx.written_regs[vn.offset : vn.offset + vn.size] = v
                 if self.regs_lv.has_const_ops:
                     gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 else:

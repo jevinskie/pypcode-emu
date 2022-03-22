@@ -265,7 +265,7 @@ class PCodeEmu:
         )
         if res.error is not None:
             raise RuntimeError(res.error)
-        sctx = SpaceContext()
+        sctx = self.sctx_t()
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
