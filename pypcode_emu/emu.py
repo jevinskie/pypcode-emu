@@ -4,7 +4,7 @@ import collections
 import mmap
 import struct
 import time
-from typing import Optional, Sequence, Type, Union
+from typing import ClassVar, Optional, Sequence, Type, Union
 
 import untangle
 from pypcode import (
@@ -49,7 +49,9 @@ def subpiece(v, nbytes_trunc, nbytes_in, nbytes_out):
     return (sext(v, nbytes_in) >> (nbytes_trunc * 8)) & ((1 << (nbytes_out * 8)) - 1)
 
 
-class UniqueBuf(dict):
+class ValBuf(dict):
+    name: ClassVar[str]
+
     def __getitem__(self, key: slice):
         byte_off, byte_off_end, step = key.start, key.stop, key.step
         assert byte_off is not None and byte_off_end is not None
@@ -59,10 +61,10 @@ class UniqueBuf(dict):
             return super().__getitem__((byte_off, num_bytes))
         except KeyError:
             eprint(
-                f"unique[{byte_off:#06x}:{num_bytes}] aka {byte_off} lookup error. Contents:"
+                f"{self.name}[{byte_off:#06x}:{num_bytes}] aka {byte_off} lookup error. Contents:"
             )
             for k, v in self.items():
-                eprint(f"unique[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
+                eprint(f"{self.name}[{k[0]:#06x}:{k[1]}] = 0x{v.hex()}")
             sys.exit(-1)
 
     def __setitem__(self, key: slice, value):
@@ -71,6 +73,10 @@ class UniqueBuf(dict):
         assert step is None
         num_bytes = byte_off_end - byte_off
         super().__setitem__((byte_off, num_bytes), value)
+
+
+class UniqueBuf(ValBuf):
+    name = "unique"
 
 
 class SpaceContext:

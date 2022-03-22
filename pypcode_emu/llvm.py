@@ -5,6 +5,7 @@ import math
 import os
 import platform
 import re
+from dataclasses import dataclass
 from typing import Callable, ClassVar, Optional, Type, Union
 
 import colorful as cf
@@ -18,7 +19,7 @@ from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
 from .elf import PF, PT
-from .emu import ELFPCodeEmu, SpaceContext, UniqueBuf
+from .emu import ELFPCodeEmu, SpaceContext, UniqueBuf, ValBuf
 from .llvm_utils import CStringPool
 from .ntypes import (
     int8,
@@ -320,8 +321,16 @@ class IntVal(ObjectProxy):
         return self.cmp_op(">", other)
 
 
+class RegBuf(ValBuf):
+    name = "register"
+
+
 class LLVMSpaceContext(SpaceContext):
-    pass
+    regs: RegBuf
+
+    def __init__(self):
+        super().__init__()
+        self.regs = RegBuf()
 
 
 class Intrinsics:
