@@ -4,7 +4,7 @@ import collections
 import mmap
 import struct
 import time
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Type, Union
 
 import untangle
 from pypcode import (
@@ -73,6 +73,13 @@ class UniqueBuf(dict):
         super().__setitem__((byte_off, num_bytes), value)
 
 
+class SpaceContext:
+    unique: UniqueBuf
+
+    def __init__(self):
+        self.unique = UniqueBuf()
+
+
 class Int(int):
     size: int
 
@@ -118,7 +125,8 @@ class PCodeEmu:
         entry: int = 0,
         initial_sp: int = 0x8000_0000,
         ret_addr: int = 0x7000_0000,
-        int_t: type = Int,
+        int_t: type = Type[Int],
+        sctx_t: type = Type[SpaceContext],
         arg0: int = 0,
     ):
         arch, endianness, bitness, _ = spec.split(":")
@@ -129,6 +137,7 @@ class PCodeEmu:
         self.initial_sp = initial_sp
         self.ret_addr = ret_addr
         self.int_t = int_t
+        self.sctx_t = sctx_t
         self.arg0 = arg0
         self.bitness = int(bitness)
         self.byteness = self.bitness // 8
@@ -211,8 +220,8 @@ class PCodeEmu:
 
     def get_register_prop(self, name: str) -> property:
         varnode = self.ctx.get_register(name)
-        getter_func = self.getter_for_varnode(varnode, UniqueBuf())
-        setter_func = self.setter_for_varnode(varnode, UniqueBuf())
+        getter_func = self.getter_for_varnode(varnode)
+        setter_func = self.setter_for_varnode(varnode)
 
         def getter(self) -> Int:
             return getter_func()
@@ -250,7 +259,7 @@ class PCodeEmu:
         )
         if res.error is not None:
             raise RuntimeError(res.error)
-        unique = UniqueBuf()
+        sctx = SpaceContext()
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
@@ -263,33 +272,33 @@ class PCodeEmu:
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
                     op.ba = op.inputs[0]
-                    store_addr_getter = self.getter_for_varnode(lambda: op.da, unique)
+                    store_addr_getter = self.getter_for_varnode(lambda: op.da, sctx)
                     op.d = self.setter_for_store(
                         store_addr_getter, store_spacebuf, op, store_space
                     )
-                    op.a = self.getter_for_varnode(lambda: op.aa, unique)
+                    op.a = self.getter_for_varnode(lambda: op.aa, sctx)
                 elif opc == OpCode.LOAD:
                     op.da = op.output
-                    op.d = self.setter_for_varnode(lambda: op.da, unique)
+                    op.d = self.setter_for_varnode(lambda: op.da, sctx)
                     op.aa = op.inputs[1]
                     load_space = op.inputs[0].get_space_from_const()
                     op.ba = op.inputs[0]
                     load_spacebuf = self.space2buf(load_space)
-                    load_addr_getter = self.getter_for_varnode(lambda: op.aa, unique)
+                    load_addr_getter = self.getter_for_varnode(lambda: op.aa, sctx)
                     op.a = self.getter_for_load(
                         load_addr_getter, load_spacebuf, op, load_space
                     )
                 else:
                     if op.output is not None:
                         op.da = op.output
-                        op.d = self.setter_for_varnode(op.da, unique)
+                        op.d = self.setter_for_varnode(op.da, sctx)
                     ninputs = len(op.inputs)
                     if ninputs >= 1:
                         op.aa = op.inputs[0]
-                        op.a = self.getter_for_varnode(op.aa, unique)
+                        op.a = self.getter_for_varnode(op.aa, sctx)
                     if ninputs >= 2:
                         op.ba = op.inputs[1]
-                        op.b = self.getter_for_varnode(op.ba, unique)
+                        op.b = self.getter_for_varnode(op.ba, sctx)
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
@@ -318,16 +327,21 @@ class PCodeEmu:
         return load_getter
 
     def getter_for_varnode(
-        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+        self,
+        vn: Union[Varnode, Callable],
+        sctx: Optional[SpaceContext] = None,
     ) -> Callable[[], Int]:
         if callable(vn):
             vn = vn()
+        if sctx is None:
+            sctx = self.sctx_t()
         if vn.space is self.unique_space:
 
             def get_unique() -> Int:
                 return self.int_t(
                     int.from_bytes(
-                        unique[vn.offset : vn.offset + vn.size], vn.space.endianness
+                        sctx.unique[vn.offset : vn.offset + vn.size],
+                        vn.space.endianness,
                     ),
                     vn.size,
                 )
@@ -362,7 +376,7 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def setter_for_varnode(
-        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+        self, vn: Union[Varnode, Callable], sctx: SpaceContext
     ) -> Callable[[Int], None]:
         if callable(vn):
             vn = vn()
@@ -373,7 +387,7 @@ class PCodeEmu:
                     v = self.int_t(v, vn.size)
                 else:
                     assert v.size == vn.size
-                unique[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
+                sctx.unique[vn.offset : vn.offset + vn.size] = v.s2u().to_bytes(
                     vn.size, vn.space.endianness
                 )
 
@@ -622,6 +636,7 @@ class ELFPCodeEmu(PCodeEmu):
         entry: Optional[Union[str, int]] = None,
         arg0: int = 0,
         int_t: type = Int,
+        sctx_t: type = SpaceContext,
     ):
         self.elf = ELF(elf_path)
         machine = {
@@ -646,7 +661,11 @@ class ELFPCodeEmu(PCodeEmu):
                 assert entry in self.elf.symbols
                 entry = self.elf.symbols[entry]
         super().__init__(
-            f"{machine}:{endianness}:{bitness}:default", entry, arg0=arg0, int_t=int_t
+            f"{machine}:{endianness}:{bitness}:default",
+            entry,
+            arg0=arg0,
+            int_t=int_t,
+            sctx_t=sctx_t,
         )
         self.segments = []
         for seg in self.elf.segments:

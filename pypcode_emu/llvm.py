@@ -18,7 +18,7 @@ from rich import inspect as rinspect
 from wrapt import ObjectProxy
 
 from .elf import PF, PT
-from .emu import ELFPCodeEmu, UniqueBuf
+from .emu import ELFPCodeEmu, SpaceContext, UniqueBuf
 from .llvm_utils import CStringPool
 from .ntypes import (
     int8,
@@ -320,6 +320,10 @@ class IntVal(ObjectProxy):
         return self.cmp_op(">", other)
 
 
+class LLVMSpaceContext(SpaceContext):
+    pass
+
+
 class Intrinsics:
     bswap_t = {ity: ir.FunctionType(ity, [ity]) for ity in (i16, i32, i64)}
     bswap: dict[type, ir.Function]
@@ -436,7 +440,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exit = self.gen_exit_decl()
         self.bb_bbs = None
 
-        super().__init__(elf_path, entry=entry, int_t=int_t, arg0=arg0)
+        super().__init__(
+            elf_path, entry=entry, int_t=int_t, sctx_t=LLVMSpaceContext, arg0=arg0
+        )
         num_exec_segs = 0
         for seg in self.elf.segments:
             if seg.type != PT.LOAD or seg.header.p_flags & PF.EXEC == 0:
@@ -616,14 +622,18 @@ class LLVMELFLifter(ELFPCodeEmu):
         return load_getter
 
     def getter_for_varnode(
-        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+        self,
+        vn: Union[Varnode, Callable],
+        sctx: Optional[LLVMSpaceContext] = None,
     ) -> Callable[[], IntVal]:
         if callable(vn):
             vn = vn()
+        if sctx is None:
+            sctx = self.sctx_t()
         if vn.space is self.unique_space:
 
             def get_unique() -> IntVal:
-                res = unique[vn.offset : vn.offset + vn.size]
+                res = sctx.unique[vn.offset : vn.offset + vn.size]
                 if self.trace:
                     self.gen_printf(f"{self.trace_pad}0x%x = {vn}\n", res)
                 return res
@@ -686,14 +696,16 @@ class LLVMELFLifter(ELFPCodeEmu):
             raise NotImplementedError(vn.space.name)
 
     def setter_for_varnode(
-        self, vn: Union[Varnode, Callable], unique: UniqueBuf
+        self, vn: Union[Varnode, Callable], sctx: Optional[LLVMSpaceContext] = None
     ) -> Callable[[IntVal], None]:
         if callable(vn):
             vn = vn()
+        if sctx is None:
+            sctx = self.sctx_t()
         if vn.space is self.unique_space:
 
             def set_unique(v: IntVal) -> None:
-                unique[vn.offset : vn.offset + vn.size] = v
+                sctx.unique[vn.offset : vn.offset + vn.size] = v
                 if self.trace:
                     self.gen_printf(f"{self.trace_pad}{vn} = 0x%x\n", v)
 
