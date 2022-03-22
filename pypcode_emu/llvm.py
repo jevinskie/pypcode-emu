@@ -33,7 +33,6 @@ from .ntypes import (
     uint64,
     uintN,
 )
-from .pcode_analysis import Liveness
 from .utils import gen_cmd
 
 real_print = print
@@ -1085,7 +1084,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             instrs = self.translate(addr)
         except RuntimeError as e:
             return None
-        liveness = Liveness(instrs)
         self.bb_bbs = {}
 
         prev_inst_last_bb = None

@@ -92,4 +92,10 @@ exported_attrs_names = [*exported_attrs_names, "uint1", "int1"]
 for n, a in zip(exported_attrs_names, exported_attrs):
     globals()[n] = a
 
+nint = nt.nint
+uint8, int8 = nt.uint8, nt.int8
+uint16, int16 = nt.uint16, nt.uint16
+uint32, int32 = nt.uint32, nt.int32
+uint64, int64 = nt.uint64, nt.int64
+
 __all__ = tuple(exported_attrs_names)
