@@ -312,8 +312,12 @@ class IntVal(ObjectProxy):
     def __le__(self, other: IntVal) -> IntVal:
         return self.cmp_op("<=", other)
 
-    def comp_eq(self, other: IntVal) -> IntVal:
-        return
+    def comp_eq(self, other: IntVal) -> bool:
+        if self is other:
+            return True
+        if self.is_const and other.is_const:
+            return self.conc == other.conc or self.c == other.c
+        raise NotImplementedError
 
     def __eq__(self, other: IntVal) -> IntVal:
         return self.cmp_op("==", other)
