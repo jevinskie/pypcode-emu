@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from pypcode_emu.llvm import *
 
 
@@ -36,13 +38,27 @@ class TestIntVal:
         print(r5_1)
         print(r5_1_p_z1_32)
 
-        eq = r5_1_p_z1_32.comp_eq(r5_0_p_z0_32)
+        eq = r5_1_p_z1_32.comp_time_eq(r5_0_p_z0_32)
         print(eq)
 
-        print(z0_32.exprs)
-        print(r5_0.exprs)
+        r5_0_p_z1_32 = r5_0 + z1_32
+        print(r5_0_p_z1_32)
         print(r5_0_p_z0_32.exprs)
+        print(r5_0_p_z1_32.exprs)
+        eq2 = r5_0_p_z1_32.comp_time_eq(r5_0_p_z0_32)
+        print(eq2)
 
-        print(z1_32.exprs)
-        print(r5_1.exprs)
-        print(r5_1_p_z1_32.exprs)
+        # print(z0_32.exprs)
+        # print(r5_0.exprs)
+        # print(r5_0_p_z0_32.exprs)
+
+        # print(z1_32.exprs)
+        # print(r5_1.exprs)
+        # print(r5_1_p_z1_32.exprs)
+
+        print()
+
+
+if __name__ == "__main__":
+    tc = TestIntVal()
+    tc.test_intval()

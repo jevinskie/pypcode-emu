@@ -82,6 +82,20 @@ def cmp(self: nt.nint, cmp: str, other: nt.nint) -> nt.uint8:
 
 nt.nint.cmp = cmp
 
+
+def strict_eq(self: nt.nint, other: nt.nint) -> bool:
+    return self.v == other.v and self.b == other.b and self.s == other.s
+
+
+nt.nint.strict_eq = strict_eq
+
+
+def comp_time_eq(self: nt.nint, other: nt.nint) -> bool:
+    return self.strict_eq(other)
+
+
+nt.nint.comp_time_eq = comp_time_eq
+
 exported_attrs_names = list(
     filter(lambda n: not n.startswith("__") and not n.endswith("__"), dir(nt))
 )

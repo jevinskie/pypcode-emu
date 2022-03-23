@@ -81,7 +81,11 @@ class IntVal(ObjectProxy):
     _self_exprs: tuple[IntVal]
 
     def __init__(
-        self, v, space: Optional[AddrSpace] = None, concrete: Optional[nint] = None
+        self,
+        v,
+        space: Optional[AddrSpace] = None,
+        concrete: Optional[nint] = None,
+        exprs: Optional[tuple] = None,
     ):
         assert not isinstance(v, ObjectProxy)
         if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
@@ -103,7 +107,13 @@ class IntVal(ObjectProxy):
 
         self._self_conc = concrete
 
-        self._self_exprs = (self,)
+        if exprs is None:
+            if concrete is not None:
+                self._self_exprs = (concrete,)
+            else:
+                self._self_exprs = (self,)
+        else:
+            self._self_exprs = exprs
 
     @classmethod
     def class_with_lifter(cls, lifter: LLVMELFLifter) -> Type[IntVal]:
@@ -154,13 +164,46 @@ class IntVal(ObjectProxy):
     def has_const_ops(self):
         return isinstance(self, ir.values._ConstOpMixin)
 
+    def comp_time_eq(self, other: IntVal) -> bool:
+        if self.is_const and other.is_const:
+            return self.conc.strict_eq(other.conc)
+        if len(self.exprs) != len(other.exprs):
+            return False
+
+        def rec_eq(a, b):
+            if isinstance(a, tuple):
+                if not isinstance(b, tuple):
+                    return False
+                if len(a) != len(b):
+                    return False
+
+                for a_sub, b_sub in zip(a, b):
+                    if not rec_eq(a_sub, b_sub):
+                        return False
+                return True
+            elif isinstance(a, str):
+                if not isinstance(b, str):
+                    return False
+                return a == b
+            elif isinstance(a, ir.NamedValue):
+                if not isinstance(b, ir.NamedValue):
+                    return False
+                return a.name == b.name
+            else:
+                return a.comp_time_eq(b)
+
+        return rec_eq(self.exprs, other.exprs)
+
     def sext(self, size: int) -> IntVal:
         if self.is_const:
             val = self.w.sext(ibN(size))
             c = self.conc.sext(size * 8)
             return type(self)(val, space=self.space, concrete=c)
+        exprs = ("sext", self.exprs)
         return type(self)(
-            self.ctx.bld.sext(self, ibN(size), name="sext"), space=self.space
+            self.ctx.bld.sext(self, ibN(size), name="sext"),
+            space=self.space,
+            exprs=exprs,
         )
 
     def zext(self, size: int) -> IntVal:
@@ -168,8 +211,11 @@ class IntVal(ObjectProxy):
             val = self.w.zext(ibN(size))
             c = self.conc.zext(size * 8)
             return type(self)(val, space=self.space, concrete=c)
+        exprs = ("zext", self.exprs)
         return type(self)(
-            self.ctx.bld.zext(self, ibN(size), name="zext"), space=self.space
+            self.ctx.bld.zext(self, ibN(size), name="zext"),
+            space=self.space,
+            exprs=exprs,
         )
 
     # these are dummy since, unlike python, everything is 2's compliment
@@ -201,8 +247,11 @@ class IntVal(ObjectProxy):
         llvm_name = llvm_name or op_name
         op_bld_func = getattr(self.ctx.bld, llvm_name)
         name = name or op_name
+        exprs = (pretty_op_name, self.exprs, other.exprs)
         return type(self)(
-            op_bld_func(self, other, name=name), space=self.cmn_space(other)
+            op_bld_func(self, other, name=name),
+            space=self.cmn_space(other),
+            exprs=exprs,
         )
 
     def cmp_op(
@@ -227,7 +276,8 @@ class IntVal(ObjectProxy):
             val = self.ctx.bld.icmp_signed(uop, self, other, name=val_name)
         else:
             val = self.ctx.bld.icmp_unsigned(uop, self, other, name=val_name)
-        return type(self)(val, space=self.cmn_space(other))
+        exprs = (op, self.exprs, other.exprs)
+        return type(self)(val, space=self.cmn_space(other), exprs=exprs)
 
     def carry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
@@ -239,9 +289,11 @@ class IntVal(ObjectProxy):
             self.ctx.intrinsics.uadd_ovf[self.type], [self, other], name="uovf_s"
         )
         ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="uovf_bit")
+        exprs = ("carry", self.exprs, other.exprs)
         return type(self)(
             self.ctx.bld.zext(ovf_bit, i8, name="uovf_byte"),
             space=self.cmn_space(other),
+            exprs=exprs,
         )
 
     def scarry(self, other: IntVal) -> IntVal:
@@ -255,9 +307,11 @@ class IntVal(ObjectProxy):
             self.ctx.intrinsics.sadd_ovf[self.type], [self, other], name="sovf_s"
         )
         ovf_bit = self.ctx.bld.extract_value(ovf_struct, 1, name="sovf_bit")
+        exprs = ("scarry", self.exprs, other.exprs)
         return type(self)(
             self.ctx.bld.zext(ovf_bit, i8, name="sovf_byte"),
             space=self.cmn_space(other),
+            exprs=exprs,
         )
 
     def bitcast(self, new_ty: ir.Type) -> IntVal:
@@ -266,7 +320,8 @@ class IntVal(ObjectProxy):
             c = nint(self.conc.v, new_ty.width, self.conc.s)
             return type(self)(val, space=self.space, concrete=c)
         else:
-            return type(self)(self.bld.bitcast(new_ty), space=self.space)
+            exprs = ("bitcast", self.exprs, new_ty)
+            return type(self)(self.bld.bitcast(new_ty), space=self.space, exprs=exprs)
 
     def asr(self, nbits: IntVal) -> IntVal:
         return self.bin_op(nbits, "asr", llvm_name="ashr")
@@ -295,9 +350,11 @@ class IntVal(ObjectProxy):
         bool_v = self.cmp_op(
             "!=", type(self)(self.type(0), space=None), name="cmov_cond"
         )
+        exprs = ("cmov", bool_v.exprs, true_val.exprs, false_val.exprs)
         return type(self)(
             self.ctx.bld.select(bool_v, true_val, false_val, name="cmov_val"),
             space=true_val.cmn_space(false_val),
+            exprs=exprs,
         )
 
     def slt(self, other: IntVal) -> IntVal:
@@ -311,13 +368,6 @@ class IntVal(ObjectProxy):
 
     def __le__(self, other: IntVal) -> IntVal:
         return self.cmp_op("<=", other)
-
-    def comp_eq(self, other: IntVal) -> bool:
-        if self is other:
-            return True
-        if self.is_const and other.is_const:
-            return self.conc == other.conc or self.c == other.c
-        raise NotImplementedError
 
     def __eq__(self, other: IntVal) -> IntVal:
         return self.cmp_op("==", other)
