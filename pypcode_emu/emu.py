@@ -281,7 +281,7 @@ class PCodeEmu:
                     op.ba = op.inputs[0]
                     store_addr_getter = self.getter_for_varnode(lambda: op.da, sctx)
                     op.d = self.setter_for_store(
-                        store_addr_getter, store_spacebuf, op, store_space
+                        store_addr_getter, store_spacebuf, op, store_space, sctx
                     )
                     op.a = self.getter_for_varnode(lambda: op.aa, sctx)
                 elif opc == OpCode.LOAD:
@@ -293,7 +293,7 @@ class PCodeEmu:
                     load_spacebuf = self.space2buf(load_space)
                     load_addr_getter = self.getter_for_varnode(lambda: op.aa, sctx)
                     op.a = self.getter_for_load(
-                        load_addr_getter, load_spacebuf, op, load_space
+                        load_addr_getter, load_spacebuf, op, load_space, sctx
                     )
                 else:
                     if op.output is not None:
@@ -309,7 +309,9 @@ class PCodeEmu:
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
-    def setter_for_store(self, store_addr_getter, store_spacebuf, op, store_space):
+    def setter_for_store(
+        self, store_addr_getter, store_spacebuf, op, store_space, sctx: SpaceContext
+    ):
         assert store_space is self.ram_space
 
         def store_setter(v: int):
@@ -320,7 +322,9 @@ class PCodeEmu:
 
         return store_setter
 
-    def getter_for_load(self, load_addr_getter, load_spacebuf, op, load_space):
+    def getter_for_load(
+        self, load_addr_getter, load_spacebuf, op, load_space, sctx: SpaceContext
+    ):
         assert load_space is self.ram_space
 
         def load_getter():

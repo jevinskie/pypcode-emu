@@ -164,6 +164,9 @@ class IntVal(ObjectProxy):
     def has_const_ops(self):
         return isinstance(self, ir.values._ConstOpMixin)
 
+    # def __hash__(self):
+    #     if isinstance(self.w,
+
     def comp_time_eq(self, other: IntVal) -> bool:
         if self.is_const and other.is_const:
             return self.conc.strict_eq(other.conc)
@@ -238,15 +241,15 @@ class IntVal(ObjectProxy):
     ) -> IntVal:
         pretty_op_name = op_name.rstrip("_")
         dunder_op_name = f"__{pretty_op_name}__"
+        llvm_name = llvm_name or op_name
+        name = name or op_name
         if self.is_const and other.is_const:
-            val_func = getattr(self.w, op_name)
+            val_func = getattr(self.w, llvm_name)
             val = val_func(other)
             c_func = getattr(self.conc, dunder_op_name)
             c = c_func(other.conc)
             return type(self)(val, space=self.cmn_space(other), concrete=c)
-        llvm_name = llvm_name or op_name
         op_bld_func = getattr(self.ctx.bld, llvm_name)
-        name = name or op_name
         exprs = (pretty_op_name, self.exprs, other.exprs)
         return type(self)(
             op_bld_func(self, other, name=name),
@@ -392,14 +395,22 @@ class RegBuf(ValBuf):
     name = "register"
 
 
+class MemBuf(dict):
+    pass
+
+
 class LLVMSpaceContext(SpaceContext):
     regs: RegBuf
     written_regs: RegBuf
+    mem: MemBuf
+    written_mem: MemBuf
 
     def __init__(self):
         super().__init__()
         self.regs = RegBuf()
         self.written_regs = RegBuf()
+        self.mem = MemBuf()
+        self.written_mem = MemBuf()
 
 
 class Intrinsics:
@@ -650,11 +661,28 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         return property(getter, setter)
 
-    def setter_for_store(self, store_addr_getter, store_spacebuf, op, store_space):
+    def setter_for_store(
+        self,
+        store_addr_getter,
+        store_spacebuf,
+        op,
+        store_space,
+        sctx: LLVMSpaceContext,
+        force: bool = False,
+    ):
         assert store_space is self.ram_space
 
         def store_setter(v: IntVal):
             virt_store_addr = store_addr_getter()
+            sctx.mem[virt_store_addr.exprs] = v
+            sctx.written_mem[virt_store_addr.exprs] = v
+            if self.trace:
+                force_str = " [forced]" if force else ""
+                self.gen_printf(
+                    f"{self.trace_pad}*%p = 0x%x{force_str}\n", virt_store_addr, v
+                )
+            if not force:
+                return
             virt_store_addr_i64 = self.bld.zext(
                 virt_store_addr, i64, "virt_store_addr_i64"
             )
@@ -666,33 +694,46 @@ class LLVMELFLifter(ELFPCodeEmu):
             )
             bswap_v = self.gen_bswap(v)
             self.bld.store(bswap_v, store_ptr)
-            if self.trace:
-                self.gen_printf(
-                    f"{self.trace_pad}*%p = 0x%x\n", self.int_t(store_ptr), v
-                )
 
         return store_setter
 
-    def getter_for_load(self, load_addr_getter, load_spacebuf, op, load_space):
+    def getter_for_load(
+        self,
+        load_addr_getter,
+        load_spacebuf,
+        op,
+        load_space,
+        sctx: LLVMSpaceContext,
+        force: bool = False,
+    ):
         assert load_space is self.ram_space
         load_ty = ibN(op.da.size)
 
         def load_getter() -> IntVal:
             virt_load_addr = load_addr_getter()
-            virt_load_addr_i64 = self.bld.zext(
-                virt_load_addr, i64, "virt_load_addr_i64"
-            )
-            mapped_load_addr = self.bld.add(
-                self.mem_base_lv, virt_load_addr_i64, name="mapped_load_addr"
-            )
-            load_ptr = self.bld.inttoptr(
-                mapped_load_addr, load_ty.as_pointer(), name="load_ptr"
-            )
-            load_v = self.bld.load(load_ptr, name="load")
-            res = self.int_t(self.gen_bswap(load_v), space=self.ram_space)
+            attr_str = " [forced]" if force else ""
+            if virt_load_addr.exprs in sctx.mem and not force:
+                res = sctx.mem[virt_load_addr.exprs]
+                attr_str += " [cached]"
+            else:
+                virt_load_addr_i64 = self.bld.zext(
+                    virt_load_addr, i64, "virt_load_addr_i64"
+                )
+                mapped_load_addr = self.bld.add(
+                    self.mem_base_lv, virt_load_addr_i64, name="mapped_load_addr"
+                )
+                load_ptr = self.bld.inttoptr(
+                    mapped_load_addr, load_ty.as_pointer(), name="load_ptr"
+                )
+                load_v = self.bld.load(load_ptr, name="load")
+                exprs = ("load", virt_load_addr)
+                res = self.int_t(
+                    self.gen_bswap(load_v), space=self.ram_space, exprs=exprs
+                )
+                sctx.mem[virt_load_addr.exprs] = res
             if self.trace:
                 self.gen_printf(
-                    f"{self.trace_pad}0x%x = *%p\n", res, self.int_t(load_ptr)
+                    f"{self.trace_pad}0x%x = *%p{attr_str}\n", res, virt_load_addr
                 )
             return res
 
@@ -742,9 +783,11 @@ class LLVMELFLifter(ELFPCodeEmu):
                             inbounds=True,
                             name=f"{self.alias_reg(rname)}_ld_ptr",
                         )
+                    exprs = ("get_reg", self.alias_reg(rname))
                     res = self.int_t(
                         self.bld.load(gep, name=self.alias_reg(rname)),
                         space=self.reg_space,
+                        exprs=exprs,
                     )
                     sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
@@ -757,6 +800,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return get_register
         elif vn.space is self.ram_space:
+            raise NotImplementedError
 
             def get_ram() -> IntVal:
                 gep = self.bld.gep(
@@ -827,6 +871,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return set_register
         elif vn.space is self.ram_space:
+            raise NotImplementedError
 
             def set_ram(v: IntVal) -> None:
                 bswapped = self.gen_bswap(v)
@@ -1242,6 +1287,15 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.gen_bb_caller_call(next_pc)
 
         return f
+
+    def write_dirtied_regs(self):
+        for vn_off, vn_sz in self.sctx.written_regs.keys():
+            rname = self.ctx.get_register_name(self.reg_space, vn_off, vn_sz)
+            vn = self.ctx.get_register(rname)
+            reg_setter = self.setter_for_varnode(vn, force=True)
+            dirty_val = self.sctx.written_regs[vn.offset : vn.offset + vn.size]
+            reg_setter(dirty_val)
+            dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
 
     def write_dirtied_regs(self):
         for vn_off, vn_sz in self.sctx.written_regs.keys():

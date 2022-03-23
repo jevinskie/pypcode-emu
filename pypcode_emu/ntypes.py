@@ -96,6 +96,13 @@ def comp_time_eq(self: nt.nint, other: nt.nint) -> bool:
 
 nt.nint.comp_time_eq = comp_time_eq
 
+
+def nint_hash(self: nt.nint) -> int:
+    return hash((self.v, self.b, self.s))
+
+
+nt.nint.__hash__ = nint_hash
+
 exported_attrs_names = list(
     filter(lambda n: not n.startswith("__") and not n.endswith("__"), dir(nt))
 )
