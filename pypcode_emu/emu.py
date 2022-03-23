@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import collections
+import collections.abc
 import mmap
 import struct
 import time
@@ -604,7 +604,7 @@ class PCodeEmu:
         pretty: bool = True,
         raw: bool = True,
     ):
-        if not isinstance(instr, collections.Sequence):
+        if not isinstance(instr, collections.abc.Sequence):
             instr = (instr,)
         for insn in instr:
             dprint("-" * 80)

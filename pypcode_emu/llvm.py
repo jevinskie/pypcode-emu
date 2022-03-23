@@ -78,6 +78,7 @@ class IntVal(ObjectProxy):
     ctx: LLVMELFLifter  # Pycharm bug, should be ClassVar[LLVMELFLifter]
     _self_space: Optional[AddrSpace]
     _self_conc: Optional[nint]
+    _self_exprs: tuple[IntVal]
 
     def __init__(
         self, v, space: Optional[AddrSpace] = None, concrete: Optional[nint] = None
@@ -102,6 +103,8 @@ class IntVal(ObjectProxy):
 
         self._self_conc = concrete
 
+        self._self_exprs = tuple(self)
+
     @classmethod
     def class_with_lifter(cls, lifter: LLVMELFLifter) -> Type[IntVal]:
         return type("BoundIntVal", (IntVal,), {"ctx": lifter})
@@ -124,6 +127,10 @@ class IntVal(ObjectProxy):
         if self._self_conc is None:
             raise TypeError(f"{type(self)} is not concrete")
         return self._self_conc
+
+    @property
+    def exprs(self):
+        return self._self_exprs
 
     @property
     def size(self) -> int:
