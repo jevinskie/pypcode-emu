@@ -1297,15 +1297,6 @@ class LLVMELFLifter(ELFPCodeEmu):
             reg_setter(dirty_val)
             dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
 
-    def write_dirtied_regs(self):
-        for vn_off, vn_sz in self.sctx.written_regs.keys():
-            rname = self.ctx.get_register_name(self.reg_space, vn_off, vn_sz)
-            vn = self.ctx.get_register(rname)
-            reg_setter = self.setter_for_varnode(vn, force=True)
-            dirty_val = self.sctx.written_regs[vn.offset : vn.offset + vn.size]
-            reg_setter(dirty_val)
-            dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
-
     def lift(self):
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
         for addr in self.text_addrs_sentinel:
