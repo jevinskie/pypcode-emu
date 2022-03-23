@@ -251,6 +251,7 @@ class PCodeEmu:
         max_bytes: int = 0,
         bb_terminating: bool = False,
         bb_nonlinear_terminating: bool = True,
+        sctx: Optional[SpaceContext] = None,
     ) -> Sequence[Translation]:
         # dprint(f"translate {addr:#010x}")
         if addr in self.bb_cache:
@@ -265,7 +266,7 @@ class PCodeEmu:
         )
         if res.error is not None:
             raise RuntimeError(res.error)
-        sctx = self.sctx_t()
+        sctx = sctx or self.sctx_t()
         for insn in res.instructions:
             a = insn.address
             # FIXME: probably useless
@@ -339,8 +340,7 @@ class PCodeEmu:
     ) -> Callable[[], Int]:
         if callable(vn):
             vn = vn()
-        if sctx is None:
-            sctx = self.sctx_t()
+        sctx = sctx or self.sctx_t()
         if vn.space is self.unique_space:
 
             def get_unique() -> Int:
@@ -382,10 +382,13 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def setter_for_varnode(
-        self, vn: Union[Varnode, Callable], sctx: SpaceContext
+        self,
+        vn: Union[Varnode, Callable],
+        sctx: Optional[SpaceContext] = None,
     ) -> Callable[[Int], None]:
         if callable(vn):
             vn = vn()
+        sctx = sctx or self.sctx_t()
         if vn.space is self.unique_space:
 
             def set_unique(v: Int):

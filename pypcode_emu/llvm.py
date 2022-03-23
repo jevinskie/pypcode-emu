@@ -410,6 +410,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     inline: bool
     assertions: bool
     debugtrap: ir.Function
+    sctx: LLVMSpaceContext
 
     def __init__(
         self,
@@ -450,6 +451,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.printf = self.gen_printf_decl()
         self.exit = self.gen_exit_decl()
         self.bb_bbs = None
+        self.sctx = None
 
         super().__init__(
             elf_path, entry=entry, int_t=int_t, sctx_t=LLVMSpaceContext, arg0=arg0
@@ -636,11 +638,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         self,
         vn: Union[Varnode, Callable],
         sctx: Optional[LLVMSpaceContext] = None,
+        force: bool = False,
     ) -> Callable[[], IntVal]:
         if callable(vn):
             vn = vn()
-        if sctx is None:
-            sctx = self.sctx_t()
+        sctx = sctx or self.sctx_t()
         if vn.space is self.unique_space:
 
             def get_unique() -> IntVal:
@@ -662,24 +664,28 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
-                if (vn.offset, vn.size) in sctx.regs:
-                    return sctx.regs[vn.offset : vn.offset + vn.size]
-                if self.regs_lv.has_const_ops:
-                    gep = self.regs_lv.gep([i32(0), i32(ridx)])
+                attr_str = " [forced]" if force else ""
+                if (vn.offset, vn.size) in sctx.regs and not force:
+                    res = sctx.regs[vn.offset : vn.offset + vn.size]
+                    attr_str += " [cached]"
                 else:
-                    gep = self.bld.gep(
-                        self.regs_lv,
-                        [i32(0), i32(ridx)],
-                        name=f"{self.alias_reg(rname)}_ld_ptr",
+                    if self.regs_lv.has_const_ops:
+                        gep = self.regs_lv.gep([i32(0), i32(ridx)])
+                    else:
+                        gep = self.bld.gep(
+                            self.regs_lv,
+                            [i32(0), i32(ridx)],
+                            name=f"{self.alias_reg(rname)}_ld_ptr",
+                        )
+                    res = self.int_t(
+                        self.bld.load(gep, name=self.alias_reg(rname)),
+                        space=self.reg_space,
                     )
-                res = self.int_t(
-                    self.bld.load(gep, name=self.alias_reg(rname)), space=self.reg_space
-                )
-                sctx.regs[vn.offset : vn.offset + vn.size] = res
+                    sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     self.gen_printf(
-                        f"{self.trace_pad}0x%x = {vn} ({cf.orange}{pretty_name}{cf.reset})\n",
+                        f"{self.trace_pad}0x%x = {vn} ({cf.orange}{pretty_name}{cf.reset}){attr_str}\n",
                         res,
                     )
                 return res
@@ -710,12 +716,14 @@ class LLVMELFLifter(ELFPCodeEmu):
             raise NotImplementedError(vn.space.name)
 
     def setter_for_varnode(
-        self, vn: Union[Varnode, Callable], sctx: Optional[LLVMSpaceContext] = None
+        self,
+        vn: Union[Varnode, Callable],
+        sctx: Optional[LLVMSpaceContext] = None,
+        force: bool = False,
     ) -> Callable[[IntVal], None]:
         if callable(vn):
             vn = vn()
-        if sctx is None:
-            sctx = self.sctx_t()
+        sctx = sctx or self.sctx_t()
         if vn.space is self.unique_space:
 
             def set_unique(v: IntVal) -> None:
@@ -733,6 +741,15 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_register(v: IntVal) -> None:
                 sctx.regs[vn.offset : vn.offset + vn.size] = v
                 sctx.written_regs[vn.offset : vn.offset + vn.size] = v
+                if self.trace:
+                    pretty_name = self.alias_reg(vn.get_register_name())
+                    force_str = " [forced]" if force else ""
+                    self.gen_printf(
+                        f"{self.trace_pad}{vn} = 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
+                        v,
+                    )
+                if not force:
+                    return
                 if self.regs_lv.has_const_ops:
                     gep = self.regs_lv.gep([i32(0), i32(ridx)])
                 else:
@@ -742,12 +759,6 @@ class LLVMELFLifter(ELFPCodeEmu):
                         name=f"{self.alias_reg(rname)}_st_ptr",
                     )
                 self.bld.store(v, gep)
-                if self.trace:
-                    pretty_name = self.alias_reg(vn.get_register_name())
-                    self.gen_printf(
-                        f"{self.trace_pad}{vn} = 0x%x ({cf.orange}{pretty_name}{cf.reset})\n",
-                        v,
-                    )
 
             return set_register
         elif vn.space is self.ram_space:
@@ -784,7 +795,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.bld.cbranch(cond_v, true_bb, false_bb)
             return tgt, True
         else:
-            self.gen_bb_caller_call(tgt)
+            self.gen_bb_caller_call(tgt, self.sctx)
             return None, True
 
     def handle_branchind(self, op: PcodeOp):
@@ -888,6 +899,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
+        self.write_dirtied_regs()
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
@@ -1108,8 +1120,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.addr2bb_gv.initializer = ir.Constant(self.addr2bb_t, self.addr2bb)
 
     def gen_bb_func(self, addr: int, f: ir.Function) -> Optional[ir.Function]:
+        self.sctx = self.sctx_t()
         try:
-            instrs = self.translate(addr)
+            instrs = self.translate(addr, sctx=self.sctx)
         except RuntimeError as e:
             return None
         self.bb_bbs = {}
@@ -1124,14 +1137,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                     with self.bld.goto_block(prev_inst_last_bb):
                         self.bld.branch(bb)
             prev_inst_last_bb = bb
-        with self.bld.goto_block(bb):
-            next_pc = self.int_t(
-                self.iptr(instr.address.offset + instr.length + instr.length_delay),
-                space=self.const_space,
-            )
-            self.gen_bb_caller_call(next_pc)
 
-        entry_bb = list(self.bb_bbs.items())[0][1]
+        bb_list = list(self.bb_bbs.items())
+        entry_bb = bb_list[0][1]
+        exit_bb = bb_list[-1][1]
         self.mem_lv = self.int_t(f.args[0])
         self.mem_lv.name = "mem_ptr"
         self.regs_lv = self.int_t(f.args[1])
@@ -1157,7 +1166,23 @@ class LLVMELFLifter(ELFPCodeEmu):
                     next_bb = self.bb_bbs[(inst_addr, i + 1)]
                     self.bld.branch(next_bb)
 
+        with self.bld.goto_block(exit_bb):
+            next_pc = self.int_t(
+                self.iptr(instr.address.offset + instr.length + instr.length_delay),
+                space=self.const_space,
+            )
+            self.gen_bb_caller_call(next_pc)
+
         return f
+
+    def write_dirtied_regs(self):
+        for vn_off, vn_sz in self.sctx.written_regs.keys():
+            rname = self.ctx.get_register_name(self.reg_space, vn_off, vn_sz)
+            vn = self.ctx.get_register(rname)
+            reg_setter = self.setter_for_varnode(vn, force=True)
+            dirty_val = self.sctx.written_regs[vn.offset : vn.offset + vn.size]
+            reg_setter(dirty_val)
+            dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
 
     def lift(self):
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
