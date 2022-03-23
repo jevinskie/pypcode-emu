@@ -16,6 +16,7 @@ from more_itertools import chunked
 from path import Path
 from pypcode import AddrSpace, PcodeOp, Translation, Varnode
 from rich import inspect as rinspect
+from rich import print as rprint
 from wrapt import ObjectProxy
 
 from .elf import PF, PT
@@ -168,6 +169,7 @@ class IntVal(ObjectProxy):
     #     if isinstance(self.w,
 
     def comp_time_eq(self, other: IntVal) -> bool:
+        raise NotImplementedError
         if self.is_const and other.is_const:
             return self.conc.strict_eq(other.conc)
         if len(self.exprs) != len(other.exprs):
@@ -675,7 +677,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         def store_setter(v: IntVal):
             virt_store_addr = store_addr_getter()
             sctx.mem[virt_store_addr.exprs] = v
-            sctx.written_mem[virt_store_addr.exprs] = v
+            sctx.written_mem[virt_store_addr.exprs] = (virt_store_addr, v)
             if self.trace:
                 force_str = " [forced]" if force else ""
                 self.gen_printf(
@@ -783,11 +785,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                             inbounds=True,
                             name=f"{self.alias_reg(rname)}_ld_ptr",
                         )
-                    exprs = ("get_reg", self.alias_reg(rname))
                     res = self.int_t(
                         self.bld.load(gep, name=self.alias_reg(rname)),
                         space=self.reg_space,
-                        exprs=exprs,
                     )
                     sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
@@ -1011,6 +1011,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
         self.write_dirtied_regs()
+        self.write_diritied_mem()
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
@@ -1296,6 +1297,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             dirty_val = self.sctx.written_regs[vn.offset : vn.offset + vn.size]
             reg_setter(dirty_val)
             dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
+
+    def write_diritied_mem(self):
+        rprint(self.sctx.written_mem)
+        pass
 
     def lift(self):
         addrs = self.text_addrs if self.bb_override is None else self.bb_override
