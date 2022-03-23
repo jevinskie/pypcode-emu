@@ -688,6 +688,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                         gep = self.bld.gep(
                             self.regs_lv,
                             [i32(0), i32(ridx)],
+                            inbounds=True,
                             name=f"{self.alias_reg(rname)}_ld_ptr",
                         )
                     res = self.int_t(
@@ -841,6 +842,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         bb_addr.name = "bb_addr"
         self.mem_lv = self.int_t(f.args[1])
         self.mem_lv.name = "mem_ptr"
+        self.mem_lv.attributes.add("nocapture")
+        self.mem_lv.attributes.add("noalias")
         self.regs_lv = self.int_t(f.args[2])
         self.regs_lv.name = "regs_ptr"
         self.regs_lv.attributes.add("nocapture")
@@ -1156,6 +1159,8 @@ class LLVMELFLifter(ELFPCodeEmu):
         exit_bb = bb_list[-1][1]
         self.mem_lv = self.int_t(f.args[0])
         self.mem_lv.name = "mem_ptr"
+        self.mem_lv.attributes.add("nocapture")
+        self.mem_lv.attributes.add("noalias")
         self.regs_lv = self.int_t(f.args[1])
         self.regs_lv.name = "regs_ptr"
         self.regs_lv.attributes.add("nocapture")
@@ -1203,8 +1208,14 @@ class LLVMELFLifter(ELFPCodeEmu):
             f = ir.Function(self.m, self.bb_t, f"bb_{addr:#010x}")
             f.linkage = "internal"
             f.calling_convention = "tailcc"
-            regs_arg = self.int_t(f.args[0])
-            regs_arg.name = "regs"
+            self.mem_lv = self.int_t(f.args[0])
+            self.mem_lv.name = "mem_ptr"
+            self.mem_lv.attributes.add("nocapture")
+            self.mem_lv.attributes.add("noalias")
+            self.regs_lv = self.int_t(f.args[1])
+            self.regs_lv.name = "regs_ptr"
+            self.regs_lv.attributes.add("nocapture")
+            self.regs_lv.attributes.add("noalias")
             if self.inline:
                 f.attributes.add("alwaysinline")
             self.addr2bb[self.addr2bb_idx(addr)] = f
