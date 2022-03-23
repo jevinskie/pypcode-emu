@@ -103,7 +103,7 @@ class IntVal(ObjectProxy):
 
         self._self_conc = concrete
 
-        self._self_exprs = tuple(self)
+        self._self_exprs = (self,)
 
     @classmethod
     def class_with_lifter(cls, lifter: LLVMELFLifter) -> Type[IntVal]:
@@ -112,6 +112,9 @@ class IntVal(ObjectProxy):
     @property
     def w(self):
         return self.__wrapped__
+
+    def __repr__(self):
+        return f"<IntVal for {repr(self.w)}>"
 
     def cmn_space(self, other: IntVal) -> Optional[AddrSpace]:
         if self.space is other.space:
@@ -308,6 +311,9 @@ class IntVal(ObjectProxy):
 
     def __le__(self, other: IntVal) -> IntVal:
         return self.cmp_op("<=", other)
+
+    def comp_eq(self, other: IntVal) -> IntVal:
+        return
 
     def __eq__(self, other: IntVal) -> IntVal:
         return self.cmp_op("==", other)
