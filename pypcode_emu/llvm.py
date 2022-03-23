@@ -395,7 +395,6 @@ class LLVMELFLifter(ELFPCodeEmu):
     untrans_panic: ir.Function
     instr_len: int
     regs_t: ir.IdentifiedStructType
-    regs_gv: ir.GlobalVariable
     regs_lv: ir.Argument
     mem_t: ir.ArrayType
     mem_gv: ir.GlobalVariable
@@ -546,9 +545,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         self.regs_t = self.m.context.get_identified_type("regs_t")
         self.regs_t.set_body(*struct_mem_types)
-        self.regs_gv = self.int_t(ir.GlobalVariable(self.m, self.regs_t, "regs"))
-        self.regs_gv.align = 16
-        self.regs_lv = self.regs_gv
+        self.regs_lv = None
 
         # FIXME rename this function
         self.mem_t = ir.ArrayType(i8, 0x1_0000_0000).as_pointer()
@@ -860,8 +857,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         # final return check
         is_final_return = ret_addr.cmp_op("==", bb_addr, name="is_final_return")
         with self.bld.if_then(is_final_return, likely=False):
-            tmp_regs_to_store = self.bld.load(self.regs_lv, name="tmp_regs_to_store")
-            self.bld.store(tmp_regs_to_store, self.regs_gv)
             self.bld.ret_void()
 
         # bounds check
@@ -869,6 +864,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         not_over = bb_addr.cmp_op("<", text_end, name="bb_addr_not_over")
         self.gen_assert(
             not_under & not_over,
+            self.regs_lv,
             "bb_addr 0x%x is out of addr2bb range of 0x%x to 0x%x",
             bb_addr,
             text_start,
@@ -1065,16 +1061,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         return ir.Function(self.m, printf_t, "printf")
 
     def gen_regs_dump_decls(self):
-        dump_t = ir.FunctionType(void, [])
+        dump_t = ir.FunctionType(void, [self.regs_t.as_pointer()])
         norm = ir.Function(self.m, dump_t, "regs_dump")
         aliased = ir.Function(self.m, dump_t, "regs_dump_alias")
         return norm, aliased
 
-    def gen_regs_dump_call(self):
-        self.bld.call(self.regs_dump, [], name="regs_dump_call")
+    def gen_regs_dump_call(self, regs_ptr: IntVal):
+        self.bld.call(self.regs_dump, [regs_ptr], name="regs_dump_call")
 
-    def gen_regs_dump_alias_call(self):
-        self.bld.call(self.regs_dump_alias, [], name="regs_dump_alias_call")
+    def gen_regs_dump_alias_call(self, regs_ptr: IntVal):
+        self.bld.call(self.regs_dump_alias, [regs_ptr], name="regs_dump_alias_call")
 
     def gen_exit_decl(self):
         exit_t = ir.FunctionType(void, [i32])
@@ -1084,7 +1080,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_exit_call(self, status: int):
         self.bld.call(self.exit, [i32(status)], name="exit_call")
 
-    def gen_assert(self, cond: IntVal, fmt: str, *args):
+    def gen_assert(self, cond: IntVal, regs_ptr: IntVal, fmt: str, *args):
         if not self.assertions:
             return
 
@@ -1094,7 +1090,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 *args,
                 name="assert_printf",
             )
-            self.gen_regs_dump_alias_call()
+            self.gen_regs_dump_alias_call(regs_ptr)
             self.gen_printf("\n")
             self.gen_debugtrap()
             self.gen_exit_call(-42)
@@ -1252,8 +1248,8 @@ class LLVMELFLifter(ELFPCodeEmu):
                 p(f"    u{reg.size * 8} {rname};")
             p("} regs_t __attribute__((aligned(16)));")
             p()
-            p('extern "C" void regs_dump();')
-            p('extern "C" void regs_dump_alias();')
+            p('extern "C" void regs_dump(regs_t *regs);')
+            p('extern "C" void regs_dump_alias(regs_t *regs);')
             p('extern "C" void regs_init(regs_t *regs);')
             p()
 
@@ -1265,18 +1261,18 @@ class LLVMELFLifter(ELFPCodeEmu):
             p("#include <fmt/color.h>")
             p("using namespace fmt;")
             p()
-            p("regs_t regs;")
+            p("regs_t regs_dbginfo_dummy;")
             p()
 
             def gen_reg_dump_func(func_name: str, alias_func=lambda n: n):
-                p(f"void {func_name}() {{")
+                p(f"void {func_name}(regs_t *regs) {{")
                 for rnames in chunked(reg_names, 4):
                     fmt_str = "    ".join(
                         [f"{alias_func(n):{max_name_len}s}: {{}}" for n in rnames]
                     )
                     fmt_args = [
-                        f"format(fg(regs.{n} ? color::pale_green : color::slate_blue), "
-                        + f'"{{:#0{self.ctx.get_register(n).size * 2 + 2}x}}", regs.{n})'
+                        f"format(fg(regs->{n} ? color::pale_green : color::slate_blue), "
+                        + f'"{{:#0{self.ctx.get_register(n).size * 2 + 2}x}}", regs->{n})'
                         for n in rnames
                     ]
                     p(f'    print("{fmt_str}\\n", {", ".join(fmt_args)});')
