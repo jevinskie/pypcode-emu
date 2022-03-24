@@ -348,6 +348,9 @@ class IntVal(ObjectProxy):
     def __or__(self, other: IntVal) -> IntVal:
         return self.bin_op(other, "or_")
 
+    def __xor__(self, other: IntVal) -> IntVal:
+        return self.bin_op(other, "xor")
+
     def cmov(self, true_val: IntVal, false_val: IntVal) -> IntVal:
         if self.is_const:
             if self.conc:
@@ -912,15 +915,20 @@ class LLVMELFLifter(ELFPCodeEmu):
     def handle_cbranch(self, op: PcodeOp):
         tgt = op.a()
         cond_v = op.b()
-        if cond_v.is_const:
-            raise NotImplementedError("horray you found an optimization opportunity")
+
         if tgt.space is self.const_space:
             assert tgt.is_const
             true_bb = self.bb_bbs[(op.address, op.seq.uniq + tgt.conc.v)]
             false_bb = self.bb_bbs[(op.address, op.seq.uniq + 1)]
-            self.bld.cbranch(cond_v, true_bb, false_bb)
+            if cond_v.is_const:
+                self.bld.branch(true_bb if cond_v.conc else false_bb)
+            else:
+                self.bld.cbranch(cond_v, true_bb, false_bb)
             return tgt, True
         else:
+            raise NotImplementedError(
+                "dunno, haven't seen any cbranch that don't do intra opcode jumps"
+            )
             self.gen_bb_caller_call(tgt, self.sctx)
             return None, True
 
