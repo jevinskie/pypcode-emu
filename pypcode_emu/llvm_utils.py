@@ -28,7 +28,8 @@ class CStringPool:
             lambda m: m[0] is None, [m.groups() for m in DESCR_WORDS_RE.finditer(cstr)]
         )
         matches = [m[1] or m[2] for m in matches]
-        return f"cstr_{len(self._pool)}_{'_'.join(matches)}"
+        matches_str = "_".join(matches)[:32]
+        return f"cstr_{len(self._pool)}_{matches_str}"
 
     def __getitem__(self, item) -> ir.GlobalVariable:
         if not isinstance(item, str):
@@ -65,4 +66,5 @@ def ir_str_pretty(ugly_ir: str) -> str:
     unquoted = ir_str_unquote_names(ugly_ir)
     denopped = ir_str_remove_nops(unquoted)
     colorful = ir_str_term256(denopped)
-    return colorful
+    trimmed = colorful.rstrip() + "\n"
+    return trimmed

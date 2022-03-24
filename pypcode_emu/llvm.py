@@ -22,7 +22,7 @@ from wrapt import ObjectProxy
 
 from .elf import PF, PT
 from .emu import ELFPCodeEmu, SpaceContext, ValBuf
-from .llvm_utils import CStringPool
+from .llvm_utils import CStringPool, ir_str_pretty
 from .ntypes import (
     int8,
     int16,
@@ -1126,28 +1126,34 @@ class LLVMELFLifter(ELFPCodeEmu):
         match_num = 0
         idx_color = []
 
+        assert isinstance(fmt, str)
+        fmt_str = fmt
+
         def fix_fmt(match: re.Match):
             nonlocal match_num, args, idx_color
             arg = args[match_num]
             if match.group(1):
                 ty_str = match.group(2)
-                if ty_str == "P":
-                    assert arg.type.is_pointer
-                    res = "%p"
-                elif ty_str == "p":
-                    assert not arg.type.is_pointer
-                    res = "0x" + self.printf_fmt_spec(arg.type, x=True)
-                elif ty_str == "d":
-                    assert not arg.type.is_pointer
-                    res = self.printf_fmt_spec(arg.type, signed=True)
-                elif ty_str == "u":
-                    assert not arg.type.is_pointer
-                    res = self.printf_fmt_spec(arg.type, signed=False)
-                elif ty_str == "x":
-                    assert not arg.type.is_pointer
-                    res = self.printf_fmt_spec(arg.type, x=True)
-                res = f"%s{res}{cf.reset}"
-                idx_color.append(match_num)
+                if ty_str in ("P", "p", "d", "u", "x"):
+                    if ty_str == "P":
+                        assert arg.type.is_pointer
+                        res = "%p"
+                    elif ty_str == "p":
+                        assert not arg.type.is_pointer
+                        res = "0x" + self.printf_fmt_spec(arg.type, x=True)
+                    elif ty_str == "d":
+                        assert not arg.type.is_pointer
+                        res = self.printf_fmt_spec(arg.type, signed=True)
+                    elif ty_str == "u":
+                        assert not arg.type.is_pointer
+                        res = self.printf_fmt_spec(arg.type, signed=False)
+                    elif ty_str == "x":
+                        assert not arg.type.is_pointer
+                        res = self.printf_fmt_spec(arg.type, x=True)
+                    res = f"%s{res}{cf.reset}"
+                    idx_color.append(match_num)
+                elif ty_str == "s":
+                    res = "%s"
             elif match.group(3):
                 # 0x%x
                 assert not arg.type.is_pointer
@@ -1161,7 +1167,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return res
 
-        fmt = re.sub(PRINTF_FMT_RE, fix_fmt, fmt)
+        fmt = self.strpool[re.sub(PRINTF_FMT_RE, fix_fmt, fmt_str)]
 
         arg_ins_idx = [idx + off for idx, off in zip(idx_color, range(len(idx_color)))]
 
@@ -1172,13 +1178,12 @@ class LLVMELFLifter(ELFPCodeEmu):
             )
             args.insert(arg_idx, color_v)
 
-        if isinstance(fmt, str):
-            fmt = self.strpool[fmt]
         for i in range(len(args)):
             if isinstance(args[i], str):
                 args[i] = self.strpool[args[i]]
             if isinstance(args[i], int):
                 args[i] = i32(args[i])
+
         name = name or "printf"
         return self.bld.call(self.printf, [fmt, *args], name=name)
 
@@ -1327,13 +1332,14 @@ class LLVMELFLifter(ELFPCodeEmu):
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if self.trace:
                     bb_ir = str(op_bb)
-                    print(bb_ir)
+                    pretty_bb_ir = ir_str_pretty(bb_ir)
                     with self.bld.goto_block(op_bb):
                         # before op IR executes
                         self.bld.position_at_start(op_bb)
                         if i == 0:
                             self.gen_instr_cb_call(addr, instr)
                         self.gen_op_cb_call(addr, op)
+                        self.gen_printf("%s", pretty_bb_ir, flush=True)
                 if not was_terminated:
                     with self.bld.goto_block(op_bb):
                         self.printf_flush_buf()
