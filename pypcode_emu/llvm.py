@@ -772,7 +772,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             def get_unique() -> IntVal:
                 res = sctx.unique[vn.offset : vn.offset + vn.size]
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}0x%x ⬅ {vn}\n", res)
+                    self.gen_printf(
+                        f"{self.trace_pad}0x%x ⬅ {vn}\n", res, name="get_unique_log"
+                    )
                 return res
 
             return get_unique
@@ -1101,11 +1103,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def printf_flush_buf(self):
         for fmt, args, name, bb, inst in self.printf_buf:
             with self.bld.goto_block(bb):
-                assert inst is not None
-                if inst is not None:
-                    self.bld.position_after(inst)
-                else:
-                    self.bld.position_at_start(bb)
+                self.bld.position_after(inst)
                 self.gen_printf_ir(fmt, *args, name=name)
         self.printf_clear_buf()
 
@@ -1115,9 +1113,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         if not flush:
             bb_instrs = self.bld.basic_block.instructions
             inst = bb_instrs[-1] if len(bb_instrs) else None
+            assert inst is not None
             self.printf_buf.append((fmt, args, name, self.bld.basic_block, inst))
         else:
-            self.gen_printf_ir(fmt, *args, name=name)
+            self.gen_printf_ir(fmt, *args, name=f"{name}_forced")
 
     def gen_printf_ir(
         self, fmt: str, *args, name: Optional[str] = None
@@ -1327,6 +1326,8 @@ class LLVMELFLifter(ELFPCodeEmu):
                 self.bld.position_at_end(op_bb)
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if self.trace:
+                    bb_ir = str(op_bb)
+                    print(bb_ir)
                     with self.bld.goto_block(op_bb):
                         # before op IR executes
                         self.bld.position_at_start(op_bb)

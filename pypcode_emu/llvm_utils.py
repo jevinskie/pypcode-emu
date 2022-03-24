@@ -1,8 +1,15 @@
 import re
 
 from llvmlite import ir
+from pygments import highlight
+from pygments.formatters import Terminal256Formatter
+from pygments.lexers import LlvmLexer
 
 DESCR_WORDS_RE = re.compile("(0[xX][0-9a-fA-F]+)|([A-Z_-]{3,})|([a-z]{3,})")
+
+QUOTED_NAMES_RE = re.compile(r'((%|@)"((?:[^"\\]|\\.)*)")')
+
+NOP_RE = re.compile(r'^\s*call\s+void\s+@["]?llvm.donothing["]?\(\)\s*$')
 
 
 class CStringPool:
@@ -38,3 +45,24 @@ class CStringPool:
         bc_gv = self._int_t(bc_gv)
         self._pool[item] = bc_gv
         return bc_gv
+
+
+def ir_str_unquote_names(quoted_name_ir: str) -> str:
+    return QUOTED_NAMES_RE.sub(lambda m: f"{m.group(2)}{m.group(3)}", quoted_name_ir)
+
+
+def ir_str_remove_nops(nopped_ir: str) -> str:
+    lines = nopped_ir.splitlines()
+    lines = [l for l in lines if not NOP_RE.match(l)]
+    return "\n".join(lines)
+
+
+def ir_str_term256(bland_ir: str) -> str:
+    return highlight(bland_ir, LlvmLexer(), Terminal256Formatter(style="inkpot"))
+
+
+def ir_str_pretty(ugly_ir: str) -> str:
+    unquoted = ir_str_unquote_names(ugly_ir)
+    denopped = ir_str_remove_nops(unquoted)
+    colorful = ir_str_term256(denopped)
+    return colorful
