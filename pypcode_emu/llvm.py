@@ -683,7 +683,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             sctx.mem[virt_store_addr.exprs] = v
             sctx.written_mem[virt_store_addr.exprs] = (virt_store_addr, v)
             if self.trace:
-                force_str = " [forced]" if force else ""
+                force_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                 self.gen_printf(
                     f"{self.trace_pad}*%p = 0x%x{force_str}\n", virt_store_addr, v
                 )
@@ -717,10 +717,10 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         def load_getter() -> IntVal:
             virt_load_addr = load_addr_getter()
-            attr_str = " [forced]" if force else ""
+            attr_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
             if virt_load_addr.exprs in sctx.mem and not force:
                 res = sctx.mem[virt_load_addr.exprs]
-                attr_str += " [cached]"
+                attr_str += f" {cf.purple}[cached]{cf.reset}"
             else:
                 virt_load_addr_i64 = self.bld.zext(
                     virt_load_addr, i64, "virt_load_addr_i64"
@@ -776,10 +776,10 @@ class LLVMELFLifter(ELFPCodeEmu):
             ridx = self.reg_idx(rname)
 
             def get_register() -> IntVal:
-                attr_str = " [forced]" if force else ""
+                attr_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                 if (vn.offset, vn.size) in sctx.regs and not force:
                     res = sctx.regs[vn.offset : vn.offset + vn.size]
-                    attr_str += " [cached]"
+                    attr_str += f" {cf.purple}[cached]{cf.reset}"
                 else:
                     if self.regs_lv.has_const_ops:
                         gep = self.regs_lv.gep([i32(0), i32(ridx)])
@@ -859,7 +859,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 sctx.reg_gens[self.alias_reg(rname)] += 1
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
-                    force_str = " [forced]" if force else ""
+                    force_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                     self.gen_printf(
                         f"{self.trace_pad}{vn} = 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
                         v,
