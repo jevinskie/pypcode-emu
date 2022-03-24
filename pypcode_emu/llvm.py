@@ -967,7 +967,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         # trace
         if self.trace:
-            self.gen_printf("bb_caller() to 0x%x\n", bb_addr)
+            self.gen_printf("bb_caller() to 0x%x\n", bb_addr, flush=True)
 
         # final return check
         is_final_return = ret_addr.cmp_op("==", bb_addr, name="is_final_return")
@@ -1028,7 +1028,6 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
         self.printf_flush_buf()
-        self.printf_clear_buf()
         self.write_dirtied_regs()
         self.write_diritied_mem()
         if bb_addr.is_const:
@@ -1098,7 +1097,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     self.bld.position_after(inst)
                 else:
                     self.bld.position_at_start(bb)
-            self.gen_printf_ir(fmt, *args, name=name)
+                self.gen_printf_ir(fmt, *args, name=name)
         self.printf_clear_buf()
 
     def gen_printf(
@@ -1234,7 +1233,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 flush=flush,
             )
             self.gen_regs_dump_alias_call(regs_ptr)
-            self.gen_printf("\n", name="newline_printf", flush=True)
+            self.gen_printf("\n", name="newline_printf", flush=flush)
             self.gen_debugtrap()
             self.gen_exit_call(-42)
 
@@ -1315,7 +1314,6 @@ class LLVMELFLifter(ELFPCodeEmu):
                 assert i == op.seq.uniq
                 op_bb = self.bb_bbs[(inst_addr, i)]
                 self.bld.position_at_end(op_bb)
-                self.printf_clear_buf()
                 op_br_off, was_terminated = self.emu_pcodeop(op)
                 if self.trace:
                     with self.bld.goto_block(op_bb):
@@ -1326,6 +1324,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                         self.gen_op_cb_call(addr, op)
                 if not was_terminated:
                     with self.bld.goto_block(op_bb):
+                        self.printf_flush_buf()
                         next_bb = self.bb_bbs[(inst_addr, i + 1)]
                         self.bld.branch(next_bb)
 
