@@ -61,7 +61,7 @@ void = ir.VoidType()
 
 size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
 
-PRINTF_FMT_RE = re.compile("(%(p|d|u|x|s))|(0x%x)|(%%)")
+PRINTF_FMT_RE = re.compile("(%(p|P|d|u|x|s))|(0x%x)|(%%)")
 
 cf.use_true_colors()
 cf.update_palette(
@@ -494,6 +494,9 @@ class LLVMELFLifter(ELFPCodeEmu):
     assertions: bool
     debugtrap: ir.Function
     sctx: LLVMSpaceContext
+    printf_buf: Optional[
+        list[tuple[str, tuple, Optional[str], ir.Block, Optional[ir.Instruction]]]
+    ]
 
     def __init__(
         self,
@@ -535,6 +538,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.exit = self.gen_exit_decl()
         self.bb_bbs = None
         self.sctx = None
+        self.printf_buf = None
 
         super().__init__(
             elf_path, entry=entry, int_t=int_t, sctx_t=LLVMSpaceContext, arg0=arg0
@@ -641,9 +645,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld.position_at_end(bb)
         self.regs_lv = regs_ptr
         for rname in self.ctx.get_register_names():
+            self.printf_clear_buf()
             reg = self.ctx.get_register(rname)
             setter = self.setter_for_varnode(reg)
             setter(self.int_t(ibN(reg.size)(init.get(rname, 0))))
+            self.printf_flush_buf()
         self.bld.ret_void()
 
     def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
@@ -965,17 +971,18 @@ class LLVMELFLifter(ELFPCodeEmu):
         with self.bld.if_then(is_final_return, likely=False):
             self.bld.ret_void()
 
-        # bounds check
-        not_under = bb_addr.cmp_op(">=", text_start, name="bb_addr_not_under")
-        not_over = bb_addr.cmp_op("<", text_end, name="bb_addr_not_over")
-        self.gen_assert(
-            not_under & not_over,
-            self.regs_lv,
-            "bb_addr 0x%x is out of addr2bb range of 0x%x to 0x%x",
-            bb_addr,
-            text_start,
-            text_end,
-        )
+        if self.assertions:
+            # bounds check
+            not_under = bb_addr.cmp_op(">=", text_start, name="bb_addr_not_under")
+            not_over = bb_addr.cmp_op("<", text_end, name="bb_addr_not_over")
+            self.gen_assert(
+                not_under & not_over,
+                self.regs_lv,
+                "bb_addr 0x%x is out of addr2bb range of 0x%x to 0x%x",
+                bb_addr,
+                text_start,
+                text_end,
+            )
 
         # access
         off_bytes = self.bld.sub(bb_addr, text_start, name="off_bytes")
@@ -1076,7 +1083,32 @@ class LLVMELFLifter(ELFPCodeEmu):
         else:
             return f"%{sz}u"
 
-    def gen_printf(self, fmt: str, *args, name: Optional[str] = None) -> ir.CallInstr:
+    def printf_clear_buf(self):
+        self.printf_buf = []
+
+    def printf_flush_buf(self):
+        for fmt, args, name, bb, inst in self.printf_buf:
+            with self.bld.goto_block(bb):
+                if inst is not None:
+                    self.bld.position_after(inst)
+                else:
+                    raise NotImplementedError
+            self.gen_printf_ir(fmt, *args, name=name)
+        self.printf_clear_buf()
+
+    def gen_printf(
+        self, fmt: str, *args, name: Optional[str] = None, flush: bool = False
+    ) -> None:
+        if not flush:
+            bb_instrs = self.bld.basic_block.instructions
+            inst = bb_instrs[-1] if len(bb_instrs) else None
+            self.printf_buf.append((fmt, args, name, self.bld.basic_block, inst))
+        else:
+            self.gen_printf_ir(fmt, *args, name=name)
+
+    def gen_printf_ir(
+        self, fmt: str, *args, name: Optional[str] = None
+    ) -> ir.CallInstr:
         args = [*args]
         # (%p)|(%d)|(%u)|(%x)|(%s)|(%%)
         match_num = 0
@@ -1087,16 +1119,12 @@ class LLVMELFLifter(ELFPCodeEmu):
             arg = args[match_num]
             if match.group(1):
                 ty_str = match.group(2)
-                if ty_str == "p":
+                if ty_str == "P":
                     assert arg.type.is_pointer
-                    if arg.is_const:
-                        arg = self.int_t(arg.w.ptrtoint(self.iptr))
-                    else:
-                        arg = self.int_t(
-                            self.bld.ptrtoint(arg, self.iptr, name="fmt_cast")
-                        )
+                    res = "%p"
+                elif ty_str == "p":
+                    assert not arg.type.is_pointer
                     res = "0x" + self.printf_fmt_spec(arg.type, x=True)
-
                 elif ty_str == "d":
                     assert not arg.type.is_pointer
                     res = self.printf_fmt_spec(arg.type, signed=True)
@@ -1187,7 +1215,9 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_exit_call(self, status: int):
         self.bld.call(self.exit, [i32(status)], name="exit_call")
 
-    def gen_assert(self, cond: IntVal, regs_ptr: IntVal, fmt: str, *args):
+    def gen_assert(
+        self, cond: IntVal, regs_ptr: IntVal, fmt: str, *args, flush: bool = True
+    ):
         if not self.assertions:
             return
 
@@ -1196,9 +1226,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                 f"\n{cf.red}{kind}:{cf.reset}\n\n{cf.deepPink}{f}{cf.reset}\n\n",
                 *args,
                 name="assert_printf",
+                flush=flush,
             )
             self.gen_regs_dump_alias_call(regs_ptr)
-            self.gen_printf("\n")
+            self.gen_printf("\n", name="newline_printf", flush=True)
             self.gen_debugtrap()
             self.gen_exit_call(-42)
 
@@ -1277,15 +1308,24 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             for i, op in enumerate(instr.ops):
                 assert i == op.seq.uniq
-                self.bld.position_at_end(self.bb_bbs[(inst_addr, i)])
-                if self.trace:
-                    if i == 0:
-                        self.gen_instr_cb_call(addr, instr)
-                    self.gen_op_cb_call(addr, op)
+                op_bb = self.bb_bbs[(inst_addr, i)]
+                self.bld.position_at_end(op_bb)
+                self.printf_clear_buf()
                 op_br_off, was_terminated = self.emu_pcodeop(op)
+                if self.trace:
+                    with self.bld.goto_block(op_bb):
+                        # after op IR executes
+                        self.printf_flush_buf()
+
+                        # before op IR executes
+                        self.bld.position_at_start(op_bb)
+                        if i == 0:
+                            self.gen_instr_cb_call(addr, instr)
+                        self.gen_op_cb_call(addr, op)
                 if not was_terminated:
-                    next_bb = self.bb_bbs[(inst_addr, i + 1)]
-                    self.bld.branch(next_bb)
+                    with self.bld.goto_block(op_bb):
+                        next_bb = self.bb_bbs[(inst_addr, i + 1)]
+                        self.bld.branch(next_bb)
 
         with self.bld.goto_block(exit_bb):
             next_pc = self.int_t(
