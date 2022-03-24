@@ -5,6 +5,7 @@ import math
 import os
 import platform
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, ClassVar, Optional, Type, Union
 
@@ -111,6 +112,7 @@ class IntVal(ObjectProxy):
         if exprs is None:
             if concrete is not None:
                 self._self_exprs = (concrete,)
+            # elif isinstance(self.w, vv)
             else:
                 self._self_exprs = (self,)
         else:
@@ -404,6 +406,7 @@ class MemBuf(dict):
 class LLVMSpaceContext(SpaceContext):
     regs: RegBuf
     written_regs: RegBuf
+    reg_gens: defaultdict[int]
     mem: MemBuf
     written_mem: MemBuf
 
@@ -411,6 +414,7 @@ class LLVMSpaceContext(SpaceContext):
         super().__init__()
         self.regs = RegBuf()
         self.written_regs = RegBuf()
+        self.reg_gens = defaultdict(int)
         self.mem = MemBuf()
         self.written_mem = MemBuf()
 
@@ -745,6 +749,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self,
         vn: Union[Varnode, Callable],
         sctx: Optional[LLVMSpaceContext] = None,
+        op: Optional[PcodeOp] = None,
         force: bool = False,
     ) -> Callable[[], IntVal]:
         if callable(vn):
@@ -785,10 +790,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                             inbounds=True,
                             name=f"{self.alias_reg(rname)}_ld_ptr",
                         )
-                    res = self.int_t(
-                        self.bld.load(gep, name=self.alias_reg(rname)),
-                        space=self.reg_space,
-                    )
+                    arname = self.alias_reg(rname)
+                    res_v = self.bld.load(gep, name=arname)
+                    exprs = ("reg", f"{arname}_{sctx.reg_gens[arname]}")
+                    res = self.int_t(res_v, space=self.reg_space, exprs=exprs)
                     sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
@@ -828,6 +833,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self,
         vn: Union[Varnode, Callable],
         sctx: Optional[LLVMSpaceContext] = None,
+        op: Optional[PcodeOp] = None,
         force: bool = False,
     ) -> Callable[[IntVal], None]:
         if callable(vn):
@@ -850,6 +856,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_register(v: IntVal) -> None:
                 sctx.regs[vn.offset : vn.offset + vn.size] = v
                 sctx.written_regs[vn.offset : vn.offset + vn.size] = v
+                sctx.reg_gens[self.alias_reg(rname)] += 1
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     force_str = " [forced]" if force else ""
@@ -1299,8 +1306,11 @@ class LLVMELFLifter(ELFPCodeEmu):
             dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
 
     def write_diritied_mem(self):
-        rprint(self.sctx.written_mem)
-        pass
+        for virt_store_addr, v in self.sctx.written_mem.values():
+            store_setter = self.setter_for_store(
+                lambda: virt_store_addr, None, None, self.ram_space, self.sctx, True
+            )
+            store_setter(v)
 
     def lift(self):
         addrs = self.text_addrs if self.bb_override is None else self.bb_override

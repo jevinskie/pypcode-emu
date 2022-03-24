@@ -279,33 +279,37 @@ class PCodeEmu:
                     op.da = op.inputs[1]
                     op.aa = op.inputs[2]
                     op.ba = op.inputs[0]
-                    store_addr_getter = self.getter_for_varnode(lambda: op.da, sctx)
+                    store_addr_getter = self.getter_for_varnode(
+                        lambda: op.da, sctx, op=op
+                    )
                     op.d = self.setter_for_store(
                         store_addr_getter, store_spacebuf, op, store_space, sctx
                     )
-                    op.a = self.getter_for_varnode(lambda: op.aa, sctx)
+                    op.a = self.getter_for_varnode(lambda: op.aa, sctx, op=op)
                 elif opc == OpCode.LOAD:
                     op.da = op.output
-                    op.d = self.setter_for_varnode(lambda: op.da, sctx)
+                    op.d = self.setter_for_varnode(lambda: op.da, sctx, op=op)
                     op.aa = op.inputs[1]
                     load_space = op.inputs[0].get_space_from_const()
                     op.ba = op.inputs[0]
                     load_spacebuf = self.space2buf(load_space)
-                    load_addr_getter = self.getter_for_varnode(lambda: op.aa, sctx)
+                    load_addr_getter = self.getter_for_varnode(
+                        lambda: op.aa, sctx, op=op
+                    )
                     op.a = self.getter_for_load(
                         load_addr_getter, load_spacebuf, op, load_space, sctx
                     )
                 else:
                     if op.output is not None:
                         op.da = op.output
-                        op.d = self.setter_for_varnode(op.da, sctx)
+                        op.d = self.setter_for_varnode(op.da, sctx, op=op)
                     ninputs = len(op.inputs)
                     if ninputs >= 1:
                         op.aa = op.inputs[0]
-                        op.a = self.getter_for_varnode(op.aa, sctx)
+                        op.a = self.getter_for_varnode(op.aa, sctx, op=op)
                     if ninputs >= 2:
                         op.ba = op.inputs[1]
-                        op.b = self.getter_for_varnode(op.ba, sctx)
+                        op.b = self.getter_for_varnode(op.ba, sctx, op=op)
         self.bb_cache[addr] = res.instructions
         return res.instructions
 
@@ -341,6 +345,7 @@ class PCodeEmu:
         self,
         vn: Union[Varnode, Callable],
         sctx: Optional[SpaceContext] = None,
+        op: Optional[PcodeOp] = None,
     ) -> Callable[[], Int]:
         if callable(vn):
             vn = vn()
@@ -389,6 +394,7 @@ class PCodeEmu:
         self,
         vn: Union[Varnode, Callable],
         sctx: Optional[SpaceContext] = None,
+        op: Optional[PcodeOp] = None,
     ) -> Callable[[Int], None]:
         if callable(vn):
             vn = vn()
