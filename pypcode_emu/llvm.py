@@ -644,12 +644,15 @@ class LLVMELFLifter(ELFPCodeEmu):
         regs_ptr.name = "regs_ptr"
         self.bld.position_at_end(bb)
         self.regs_lv = regs_ptr
+        tmp_trace = self.trace
+        self.trace = False
+        self.printf_clear_buf()
         for rname in self.ctx.get_register_names():
-            self.printf_clear_buf()
             reg = self.ctx.get_register(rname)
             setter = self.setter_for_varnode(reg)
             setter(self.int_t(ibN(reg.size)(init.get(rname, 0))))
-            self.printf_flush_buf()
+        self.printf_flush_buf()
+        self.trace = tmp_trace
         self.bld.ret_void()
 
     def global_var(self, name: str, ty: ir.Type, init) -> ir.GlobalVariable:
@@ -1024,8 +1027,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
+        self.printf_clear_buf()
         self.write_dirtied_regs()
         self.write_diritied_mem()
+        self.printf_flush_buf()
         if bb_addr.is_const:
             call = self.bld.call(
                 self.addr2bb[self.addr2bb_idx(bb_addr.conc.as_u)],
@@ -1092,7 +1097,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 if inst is not None:
                     self.bld.position_after(inst)
                 else:
-                    raise NotImplementedError
+                    self.bld.position_at_start(bb)
             self.gen_printf_ir(fmt, *args, name=name)
         self.printf_clear_buf()
 
