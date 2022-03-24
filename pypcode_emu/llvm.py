@@ -697,7 +697,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             if self.trace:
                 force_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                 self.gen_printf(
-                    f"{self.trace_pad}*%p = 0x%x{force_str}\n", virt_store_addr, v
+                    f"{self.trace_pad}*%p := 0x%x{force_str}\n", virt_store_addr, v
                 )
             if not force:
                 return
@@ -751,7 +751,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 sctx.mem[virt_load_addr.exprs] = res
             if self.trace:
                 self.gen_printf(
-                    f"{self.trace_pad}0x%x = *%p{attr_str}\n", res, virt_load_addr
+                    f"{self.trace_pad}0x%x ⬅ *%p{attr_str}\n", res, virt_load_addr
                 )
             return res
 
@@ -772,7 +772,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             def get_unique() -> IntVal:
                 res = sctx.unique[vn.offset : vn.offset + vn.size]
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}0x%x = {vn}\n", res)
+                    self.gen_printf(f"{self.trace_pad}0x%x ⬅ {vn}\n", res)
                 return res
 
             return get_unique
@@ -810,7 +810,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     self.gen_printf(
-                        f"{self.trace_pad}0x%x = {vn} ({cf.orange}{pretty_name}{cf.reset}){attr_str}\n",
+                        f"{self.trace_pad}0x%x ⬅ {vn} ({cf.orange}{pretty_name}{cf.reset}){attr_str}\n",
                         res,
                     )
                 return res
@@ -834,7 +834,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 bswapped = self.gen_bswap(load_val)
                 res = self.int_t(bswapped, space=self.ram_space)
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}0x%x = {vn}\n", res)
+                    self.gen_printf(f"{self.trace_pad}0x%x ⬅ {vn}\n", res)
                 return res
 
             return get_ram
@@ -856,7 +856,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_unique(v: IntVal) -> None:
                 sctx.unique[vn.offset : vn.offset + vn.size] = v
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}{vn} = 0x%x\n", v)
+                    self.gen_printf(f"{self.trace_pad}{vn} := 0x%x\n", v)
 
             return set_unique
         elif vn.space is self.const_space:
@@ -873,7 +873,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     pretty_name = self.alias_reg(vn.get_register_name())
                     force_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                     self.gen_printf(
-                        f"{self.trace_pad}{vn} = 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
+                        f"{self.trace_pad}{vn} := 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
                         v,
                     )
                 if not force:
@@ -906,7 +906,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
                 self.bld.store(bswapped, store_ptr)
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}{vn} = 0x%x\n", v)
+                    self.gen_printf(f"{self.trace_pad}{vn} := 0x%x\n", v)
 
             return set_ram
         else:
@@ -1101,6 +1101,7 @@ class LLVMELFLifter(ELFPCodeEmu):
     def printf_flush_buf(self):
         for fmt, args, name, bb, inst in self.printf_buf:
             with self.bld.goto_block(bb):
+                assert inst is not None
                 if inst is not None:
                     self.bld.position_after(inst)
                 else:
@@ -1295,6 +1296,8 @@ class LLVMELFLifter(ELFPCodeEmu):
             for i in range(len(instr.ops) + 1):
                 bb = f.append_basic_block(f"pc_{inst_addr:#010x}_{i}")
                 self.bb_bbs[(inst_addr, i)] = bb
+                self.bld.position_at_start(bb)
+                self.gen_nop()
                 if i == 0 and prev_inst_last_bb:
                     with self.bld.goto_block(prev_inst_last_bb):
                         self.bld.branch(bb)
