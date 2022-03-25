@@ -1,6 +1,18 @@
 import colorsys
 import hashlib
 
+import colorful as cf
+
+cf.use_true_colors()
+cf.update_palette(
+    {
+        "slateblue": "#6A5ACD",
+        "palegreen": "#98FB98",
+        "fuschia": "#FF00FF",
+        "lawngreen": "#7CFC00",
+    }
+)
+
 
 def term_color_hsv(h: float, s: float, v: float) -> str:
     r, g, b = colorsys.hsv_to_rgb(h, s, v)

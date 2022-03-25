@@ -63,14 +63,6 @@ size2iN = bidict({1: i8, 2: i16, 4: i32, 8: i64})
 
 PRINTF_FMT_RE = re.compile("(%(p|P|d|u|x|s))|(0x%x)|(%%)")
 
-cf.use_true_colors()
-cf.update_palette(
-    {
-        "slateblue": "#6A5ACD",
-        "palegreen": "#98FB98",
-    }
-)
-
 
 def ibN(nbytes: int) -> ir.Type:
     return size2iN[nbytes]
