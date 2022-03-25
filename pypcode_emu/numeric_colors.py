@@ -1,7 +1,7 @@
 import colorsys
-import hashlib
 
 import colorful as cf
+import xxhash
 
 cf.use_true_colors()
 cf.update_palette(
@@ -24,7 +24,7 @@ def num_color(n: int) -> str:
     if n == 0:
         # red
         return term_color_hsv(0, 1, 1)
-    rand_bytes = hashlib.sha256(n.to_bytes(8, "little")).digest()
-    scaled = int.from_bytes(rand_bytes[:8], "little") / ((1 << 64) - 1)
+    hashed = xxhash.xxh3_64_intdigest(n.to_bytes(8, "little"))
+    scaled = hashed / ((1 << 64) - 1)
     scaled = 0.1 + (scaled * 0.4)
     return term_color_hsv(scaled, 1, 1)

@@ -10,7 +10,11 @@ using namespace fmt;
 
 #include "lifted.h"
 #include "pcode-opcodes.h"
-#include "picosha2.h"
+
+#define XXH_STATIC_LINKING_ONLY
+#define XXH_IMPLEMENTATION
+#define XXH_INLINE_ALL
+#include "xxhash.h"
 
 using rgb_t = struct { double r, g, b; };
 using hsv_t = struct { double h, s, v; };
@@ -85,9 +89,7 @@ uint32_t num_color(uint64_t n) {
     if (!n) {
         return hsv_to_rgb8(hsv_t{0, 1, 1});
     }
-    uint8_t rand_bytes[picosha2::k_digest_size];
-    picosha2::hash256(&n, &n + 1, rand_bytes, rand_bytes + sizeof(rand_bytes));
-    uint64_t hashed = *(uint64_t *)rand_bytes;
+    uint64_t hashed = XXH64(&n, sizeof(n), 0);
     double scaled   = hashed / (double)UINT64_MAX;
     scaled          = 0.1 + (scaled * 0.4);
     return hsv_to_rgb8(hsv_t{scaled, 1, 1});
