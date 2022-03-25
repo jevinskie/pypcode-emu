@@ -1043,7 +1043,6 @@ class LLVMELFLifter(ELFPCodeEmu):
         return f
 
     def gen_bb_caller_call(self, bb_addr: IntVal):
-        self.printf_flush_buf()
         self.write_dirtied_regs()
         self.write_diritied_mem()
         if bb_addr.is_const:
@@ -1361,9 +1360,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                             self.gen_instr_cb_call(addr, instr)
                         self.gen_op_cb_call(addr, op)
                         self.gen_printf("%s", pretty_bb_ir, flush=True)
+                        self.printf_flush_buf()
                 if not was_terminated:
                     with self.bld.goto_block(op_bb):
-                        self.printf_flush_buf()
                         next_bb = self.bb_bbs[(inst_addr, i + 1)]
                         self.bld.branch(next_bb)
 
