@@ -647,12 +647,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_lv = regs_ptr
         tmp_trace = self.trace
         self.trace = False
+        tmp_sctx = self.sctx
+        self.sctx = LLVMSpaceContext()
         self.printf_clear_buf()
         for rname in self.ctx.get_register_names():
             reg = self.ctx.get_register(rname)
-            setter = self.setter_for_varnode(reg)
+            setter = self.setter_for_varnode(reg, sctx=self.sctx)
             setter(self.int_t(ibN(reg.size)(init.get(rname, 0))))
         self.printf_flush_buf()
+        self.write_dirtied_regs()
+        self.sctx = tmp_sctx
         self.trace = tmp_trace
         self.bld.ret_void()
 

@@ -24,12 +24,14 @@ u8 *setup_mem(size_t size = 0x1'0000'0000, void *preferred_addr = (void *)0x4000
     return mem;
 }
 
+u8 *mem;
+regs_t regs;
+
 int main(int argc, const char **argv) {
     (void)argc;
     (void)argv;
 
-    u8 *mem = setup_mem();
-    regs_t regs;
+    mem = setup_mem();
     lifted_init(mem, &regs);
     lifted_run(mem, &regs);
     fmt::print("pc: {:#010x} res: {:#010x}\n", regs.pc, regs.r3);
