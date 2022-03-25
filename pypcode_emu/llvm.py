@@ -492,6 +492,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     printf_buf: Optional[
         list[tuple[str, tuple, Optional[str], ir.Block, Optional[ir.Instruction]]]
     ]
+    rgb8_t: ir.LiteralStructType
+    num_color: ir.Function
 
     def __init__(
         self,
@@ -529,6 +531,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld = ir.IRBuilder()
         int_t = IntVal.class_with_lifter(self)
         self.strpool = CStringPool(self.m, int_t)
+        self.rgb8_t, self.num_color = self.gen_num_color_decl()
         self.printf = self.gen_printf_decl()
         self.exit = self.gen_exit_decl()
         self.bb_bbs = None
@@ -1197,6 +1200,21 @@ class LLVMELFLifter(ELFPCodeEmu):
         untrans_panic_t = ir.FunctionType(void, [self.iptr])
         untrans_panic_t.args[0].name = "addr"
         return ir.Function(self.m, untrans_panic_t, "untrans_panic")
+
+    def gen_num_color_decl(self):
+        rgb8_t = self.m.context.get_identified_type("rgb8_t")
+        rgb8_t.set_body(i8, i8, i8)
+        num_color_fty = ir.FunctionType(rgb8_t, [i64])
+        num_color = ir.Function(self.m, num_color_fty, "num_color")
+        return rgb8_t, num_color
+
+    def gen_num_color_call(self, n: IntVal) -> tuple[IntVal, IntVal, IntVal]:
+        big_n = n.zext(8)
+        rgb8 = self.bld.call(self.num_color, [big_n], "num_color")
+        r = self.int_t(self.ctx.bld.extract_value(rgb8, 0, name="r"))
+        g = self.int_t(self.ctx.bld.extract_value(rgb8, 1, name="g"))
+        b = self.int_t(self.ctx.bld.extract_value(rgb8, 2, name="b"))
+        return r, g, b
 
     def gen_printf_decl(self):
         printf_t = ir.FunctionType(i32, [i8.as_pointer()])

@@ -12,9 +12,7 @@ using namespace fmt;
 #include "pcode-opcodes.h"
 #include "picosha2.h"
 
-using rgb_t  = struct { double r, g, b; };
-using rgb8_t = struct { uint8_t r, g, b; };
-
+using rgb_t = struct { double r, g, b; };
 using hsv_t = struct { double h, s, v; };
 
 static void load_segs(u8 *mem) {
