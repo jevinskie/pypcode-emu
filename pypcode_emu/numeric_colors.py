@@ -24,7 +24,7 @@ def num_color(n: int) -> str:
     if n == 0:
         # red
         return term_color_hsv(0, 1, 1)
-    rand_bytes = hashlib.sha256(n.to_bytes(16, "little")).digest()
-    scaled = int.from_bytes(rand_bytes, "little") / ((1 << (len(rand_bytes) * 8)) - 1)
+    rand_bytes = hashlib.sha256(n.to_bytes(8, "little")).digest()
+    scaled = int.from_bytes(rand_bytes[:8], "little") / ((1 << 64) - 1)
     scaled = 0.1 + (scaled * 0.8)
     return term_color_hsv(scaled, 1, 1)

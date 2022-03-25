@@ -1,8 +1,6 @@
 import re
 
-import colorful as cf
-
-from .numeric_colors import num_color
+from .numeric_colors import cf, num_color
 
 NUMBER_LIT_RE = re.compile("((0x[a-f0-9]+)((:\d+)|\[\d+\])?)")
 

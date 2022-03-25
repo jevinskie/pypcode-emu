@@ -9,7 +9,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, ClassVar, Optional, Type, Union
 
-import colorful as cf
 from bidict import bidict
 from icecream import ic
 from llvmlite import ir
@@ -36,6 +35,7 @@ from .ntypes import (
     uint64,
     uintN,
 )
+from .numeric_colors import cf, num_color
 from .utils import gen_cmd
 
 real_print = print
