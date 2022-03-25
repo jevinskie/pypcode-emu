@@ -76,7 +76,9 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
 }
 
 rgb8_t hsv_to_rgb8(hsv_t hsv) {
+    printf("\nh = %.3f, s = %.3f, v = %.3f\n", hsv.h, hsv.s, hsv.v);
     rgb_t rgb = hsv_to_rgb(hsv);
+    printf("r = %.3f, g = %.3f, b = %.3f\n", rgb.r, rgb.g, rgb.b);
     return {(uint8_t)(rgb.r * 0xFF), (uint8_t)(rgb.g * 0xFF), (uint8_t)(rgb.b * 0xFF)};
 }
 
@@ -89,5 +91,5 @@ rgb8_t num_color(uint64_t n) {
     uint64_t hashed = *(uint64_t *)rand_bytes;
     double scaled   = hashed / (double)UINT64_MAX;
     scaled          = 0.1 + (scaled * 0.8);
-    return hsv_to_rgb8(hsv_t{scaled * 10, 1, 1});
+    return hsv_to_rgb8(hsv_t{scaled, 1, 1});
 }
