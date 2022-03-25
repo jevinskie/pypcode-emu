@@ -77,7 +77,7 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
 
 rgb8_t hsv_to_rgb8(hsv_t hsv) {
     rgb_t rgb = hsv_to_rgb(hsv);
-    return {(uint8_t)(rgb.r * 0xFF), (uint8_t)(rgb.g * 255), (uint8_t)(rgb.b * 255)};
+    return {(uint8_t)(rgb.r * 0xFF), (uint8_t)(rgb.g * 0xFF), (uint8_t)(rgb.b * 0xFF)};
 }
 
 rgb8_t num_color(uint64_t n) {
@@ -86,7 +86,8 @@ rgb8_t num_color(uint64_t n) {
     }
     uint8_t rand_bytes[picosha2::k_digest_size];
     picosha2::hash256(&n, &n + 1, rand_bytes, rand_bytes + sizeof(rand_bytes));
-    double scaled = *(uint64_t *)rand_bytes / UINT64_MAX;
-    scaled        = 0.1 + (scaled * 0.8);
-    return hsv_to_rgb8(hsv_t{scaled, 1, 1});
+    uint64_t hashed = *(uint64_t *)rand_bytes;
+    double scaled   = hashed / (double)UINT64_MAX;
+    scaled          = 0.1 + (scaled * 0.8);
+    return hsv_to_rgb8(hsv_t{scaled * 10, 1, 1});
 }

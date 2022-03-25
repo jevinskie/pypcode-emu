@@ -14,7 +14,7 @@ using seg_t = struct {
     const u8 *data;
 } __attribute__((packed));
 
-using rgb8_t = struct { uint8_t r, g, b; };
+using rgb8_t = struct { uint32_t r, g, b; };
 
 extern "C" {
 

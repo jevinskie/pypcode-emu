@@ -1111,7 +1111,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             assert inst is not None
             self.printf_buf.append((fmt, args, name, self.bld.basic_block, inst))
         else:
-            self.gen_printf_ir(fmt, *args, name=f"{name}_forced")
+            self.gen_printf_ir(fmt, *args, name=f"{name + '_' if name else ''}forced")
 
     def gen_printf_ir(
         self, fmt: str, *args, name: Optional[str] = None
@@ -1123,6 +1123,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         assert isinstance(fmt, str)
         fmt_str = fmt
+        rgb_str = f"\x1b[38;2;%u;%u;%um"
 
         def fix_fmt(match: re.Match) -> str:
             nonlocal match_num, args, idx_color
@@ -1145,7 +1146,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     elif ty_str == "x":
                         assert not arg.type.is_pointer
                         res = self.printf_fmt_spec(arg.type, x=True)
-                    res = f"%s{res}{cf.reset}"
+                    res = f"{rgb_str}{res}{cf.reset}"
                     idx_color.append(match_num)
                 elif ty_str == "s":
                     res = "%s"
@@ -1153,7 +1154,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 # 0x%x
                 assert not arg.type.is_pointer
                 res = self.printf_fmt_spec(arg.type, x=True)
-                res = f"%s0x{res}{cf.reset}"
+                res = f"{rgb_str}0x{res}{cf.reset}"
                 idx_color.append(match_num)
             else:
                 res = match.string
@@ -1164,14 +1165,15 @@ class LLVMELFLifter(ELFPCodeEmu):
 
         fmt = self.strpool[PRINTF_FMT_RE.sub(fix_fmt, fmt_str)]
 
-        arg_ins_idx = [idx + off for idx, off in zip(idx_color, range(len(idx_color)))]
+        arg_ins_idx = [
+            idx + off * 3 for idx, off in zip(idx_color, range(len(idx_color)))
+        ]
 
         for arg_idx in arg_ins_idx:
-            cond_v = args[arg_idx]
-            color_v = cond_v.cmov(
-                self.strpool[str(cf.palegreen)], self.strpool[str(cf.slateblue)]
-            )
-            args.insert(arg_idx, color_v)
+            r, g, b = self.gen_num_color_call(args[arg_idx])
+            args.insert(arg_idx + 0, r)
+            args.insert(arg_idx + 1, g)
+            args.insert(arg_idx + 2, b)
 
         for i in range(len(args)):
             if isinstance(args[i], str):
@@ -1203,7 +1205,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
     def gen_num_color_decl(self):
         rgb8_t = self.m.context.get_identified_type("rgb8_t")
-        rgb8_t.set_body(i8, i8, i8)
+        rgb8_t.set_body(i32, i32, i32)
         num_color_fty = ir.FunctionType(rgb8_t, [i64])
         num_color = ir.Function(self.m, num_color_fty, "num_color")
         return rgb8_t, num_color
@@ -1211,9 +1213,9 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_num_color_call(self, n: IntVal) -> tuple[IntVal, IntVal, IntVal]:
         big_n = n.zext(8)
         rgb8 = self.bld.call(self.num_color, [big_n], "num_color")
-        r = self.int_t(self.ctx.bld.extract_value(rgb8, 0, name="r"))
-        g = self.int_t(self.ctx.bld.extract_value(rgb8, 1, name="g"))
-        b = self.int_t(self.ctx.bld.extract_value(rgb8, 2, name="b"))
+        r = self.int_t(self.bld.extract_value(rgb8, 0, name="r"))
+        g = self.int_t(self.bld.extract_value(rgb8, 1, name="g"))
+        b = self.int_t(self.bld.extract_value(rgb8, 2, name="b"))
         return r, g, b
 
     def gen_printf_decl(self):
