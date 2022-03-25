@@ -59,8 +59,7 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
     double p = hsv.v * (1.0 - hsv.s);
     double q = hsv.v * (1.0 - hsv.s * f);
     double t = hsv.v * (1.0 - hsv.s * (1.0 - f));
-
-    rgb_t rgb = {0, 0, 0};
+    rgb_t rgb;
 
     // clang-format off
     switch (i % 6) {
@@ -72,5 +71,6 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
         case 5: rgb.r = hsv.v; rgb.g = p; rgb.b = q; break;
     }
     // clang-format on
+
     return rgb;
 }
