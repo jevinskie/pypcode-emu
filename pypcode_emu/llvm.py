@@ -87,6 +87,7 @@ class IntVal(ObjectProxy):
             assert False
             v = v.w
         super().__init__(v)
+        print(self.sizee)
         self._self_space = space
         if concrete is None and self.is_const:
             try:
@@ -147,6 +148,10 @@ class IntVal(ObjectProxy):
         return {i8: 1, i16: 2, i32: 4, i64: 8, ir.PointerType: self.ctx.iptr.size}[
             self.type
         ]
+
+    @property
+    def sizee(self):
+        return 2
 
     @property
     def is_const(self) -> bool:
@@ -299,8 +304,8 @@ class IntVal(ObjectProxy):
     def scarry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
             s = self.conc.as_s + other.conc.as_s
-            int_min = -(1 << (self.size * 8 - 1))
-            int_max = (1 << (self.size * 8 - 1)) - 1
+            int_min = -(1 << (self.sizee * 8 - 1))
+            int_max = (1 << (self.sizee * 8 - 1)) - 1
             val = 1 if not int_min <= s <= int_max else 0
             return type(self)(i8(val), space=self.cmn_space(other), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
