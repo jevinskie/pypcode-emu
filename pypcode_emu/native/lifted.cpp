@@ -76,9 +76,7 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
 }
 
 uint32_t hsv_to_rgb8(hsv_t hsv) {
-    // printf("\nh = %.3f, s = %.3f, v = %.3f\n", hsv.h, hsv.s, hsv.v);
     rgb_t rgb = hsv_to_rgb(hsv);
-    // printf("r = %.3f, g = %.3f, b = %.3f\n", rgb.r, rgb.g, rgb.b);
     return (uint8_t)(rgb.r * 0xFF) | ((uint8_t)(rgb.g * 0xFF) << 8) |
            ((uint8_t)(rgb.b * 0xFF) << 16);
 }
