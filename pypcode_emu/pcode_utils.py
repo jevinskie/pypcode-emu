@@ -5,7 +5,9 @@ from .numeric_colors import cf, num_color
 NUMBER_LIT_RE = re.compile("((0x[a-f0-9]+)((:\d+)|\[\d+\])?)")
 
 
-def colorize_pcode_nums(pcode: str) -> str:
+def colorize_pcode_nums(pcode) -> str:
+    pcode = str(pcode)
+
     def xfrm(m: re.Match) -> str:
         print(m.groups())
         nstr = m.group(2)

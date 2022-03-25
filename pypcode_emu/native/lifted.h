@@ -14,8 +14,6 @@ using seg_t = struct {
     const u8 *data;
 } __attribute__((packed));
 
-using rgb8_t = struct { uint32_t r, g, b; };
-
 extern "C" {
 
 extern const u8 num_segs;
@@ -28,7 +26,7 @@ void bb_caller(uptr addr, u8 *mem, regs_t *regs);
 void instr_cb(uptr bb, uptr pc, const char *asm_mnem, const char *asm_body);
 void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc);
 void untrans_panic(uptr pc);
-rgb8_t num_color(uint64_t n);
+uint32_t num_color(uint64_t n);
 }
 
 void lifted_init(u8 *mem, regs_t *regs);

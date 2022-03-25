@@ -36,6 +36,7 @@ from .ntypes import (
     uintN,
 )
 from .numeric_colors import cf, num_color
+from .pcode_utils import colorize_pcode_nums
 from .utils import gen_cmd
 
 real_print = print
@@ -337,6 +338,9 @@ class IntVal(ObjectProxy):
     def __lshift__(self, other: IntVal) -> IntVal:
         return self.bin_op(other, "lshift", llvm_name="shl", name="lsl")
 
+    def __rshift__(self, other: IntVal) -> IntVal:
+        return self.bin_op(other, "rshift", llvm_name="lshr", name="lsr")
+
     def __or__(self, other: IntVal) -> IntVal:
         return self.bin_op(other, "or_")
 
@@ -492,7 +496,6 @@ class LLVMELFLifter(ELFPCodeEmu):
     printf_buf: Optional[
         list[tuple[str, tuple, Optional[str], ir.Block, Optional[ir.Instruction]]]
     ]
-    rgb8_t: ir.LiteralStructType
     num_color: ir.Function
 
     def __init__(
@@ -531,7 +534,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.bld = ir.IRBuilder()
         int_t = IntVal.class_with_lifter(self)
         self.strpool = CStringPool(self.m, int_t)
-        self.rgb8_t, self.num_color = self.gen_num_color_decl()
+        self.num_color = self.gen_num_color_decl()
         self.printf = self.gen_printf_decl()
         self.exit = self.gen_exit_decl()
         self.bb_bbs = None
@@ -768,7 +771,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                 res = sctx.unique[vn.offset : vn.offset + vn.size]
                 if self.trace:
                     self.gen_printf(
-                        f"{self.trace_pad}0x%x ⬅ {vn}\n", res, name="get_unique_log"
+                        f"{self.trace_pad}0x%x ⬅ {colorize_pcode_nums(vn)}\n",
+                        res,
+                        name="get_unique_log",
                     )
                 return res
 
@@ -807,7 +812,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
                     self.gen_printf(
-                        f"{self.trace_pad}0x%x ⬅ {vn} ({cf.orange}{pretty_name}{cf.reset}){attr_str}\n",
+                        f"{self.trace_pad}0x%x ⬅ {colorize_pcode_nums(vn)} ({cf.orange}{pretty_name}{cf.reset}){attr_str}\n",
                         res,
                     )
                 return res
@@ -831,7 +836,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                 bswapped = self.gen_bswap(load_val)
                 res = self.int_t(bswapped, space=self.ram_space)
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}0x%x ⬅ {vn}\n", res)
+                    self.gen_printf(
+                        f"{self.trace_pad}0x%x ⬅ {colorize_pcode_nums(vn)}\n", res
+                    )
                 return res
 
             return get_ram
@@ -853,7 +860,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             def set_unique(v: IntVal) -> None:
                 sctx.unique[vn.offset : vn.offset + vn.size] = v
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}{vn} := 0x%x\n", v)
+                    self.gen_printf(
+                        f"{self.trace_pad}{colorize_pcode_nums(vn)} := 0x%x\n", v
+                    )
 
             return set_unique
         elif vn.space is self.const_space:
@@ -870,7 +879,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                     pretty_name = self.alias_reg(vn.get_register_name())
                     force_str = f" {cf.yellow}[forced]{cf.reset}" if force else ""
                     self.gen_printf(
-                        f"{self.trace_pad}{vn} := 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
+                        f"{self.trace_pad}{colorize_pcode_nums(vn)} := 0x%x ({cf.orange}{pretty_name}{cf.reset}){force_str}\n",
                         v,
                     )
                 if not force:
@@ -903,7 +912,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                 )
                 self.bld.store(bswapped, store_ptr)
                 if self.trace:
-                    self.gen_printf(f"{self.trace_pad}{vn} := 0x%x\n", v)
+                    self.gen_printf(
+                        f"{self.trace_pad}{colorize_pcode_nums(vn)} := 0x%x\n", v
+                    )
 
             return set_ram
         else:
@@ -1058,7 +1069,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 self.iptr(bb),
                 self.iptr(inst.address.offset),
                 self.strpool[inst.asm_mnem],
-                self.strpool[inst.asm_body],
+                self.strpool[colorize_pcode_nums(inst.asm_body)],
             ],
             name="inst_cb_call",
         )
@@ -1071,7 +1082,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                 self.iptr(op.address),
                 i32(op.seq.uniq),
                 i32(op.opcode.value),
-                self.strpool[str(op)],
+                self.strpool[colorize_pcode_nums(str(op))],
             ],
             name="op_cb_call",
         )
@@ -1204,18 +1215,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         return ir.Function(self.m, untrans_panic_t, "untrans_panic")
 
     def gen_num_color_decl(self):
-        rgb8_t = self.m.context.get_identified_type("rgb8_t")
-        rgb8_t.set_body(i32, i32, i32)
-        num_color_fty = ir.FunctionType(rgb8_t, [i64])
+        num_color_fty = ir.FunctionType(i32, [i64])
         num_color = ir.Function(self.m, num_color_fty, "num_color")
-        return rgb8_t, num_color
+        return num_color
 
     def gen_num_color_call(self, n: IntVal) -> tuple[IntVal, IntVal, IntVal]:
         big_n = n.zext(8)
-        rgb8 = self.bld.call(self.num_color, [big_n], "num_color")
-        r = self.int_t(self.bld.extract_value(rgb8, 0, name="r"))
-        g = self.int_t(self.bld.extract_value(rgb8, 1, name="g"))
-        b = self.int_t(self.bld.extract_value(rgb8, 2, name="b"))
+        rgb = self.int_t(self.bld.call(self.num_color, [big_n], "num_color"))
+        r = rgb & self.int_t(i32(0xFF))
+        g = (rgb >> self.int_t(i32(8))) & self.int_t(i32(0xFF))
+        b = (rgb >> self.int_t(i32(16))) & self.int_t(i32(0xFF))
         return r, g, b
 
     def gen_printf_decl(self):

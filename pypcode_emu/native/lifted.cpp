@@ -75,14 +75,15 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
     return rgb;
 }
 
-rgb8_t hsv_to_rgb8(hsv_t hsv) {
-    printf("\nh = %.3f, s = %.3f, v = %.3f\n", hsv.h, hsv.s, hsv.v);
+uint32_t hsv_to_rgb8(hsv_t hsv) {
+    // printf("\nh = %.3f, s = %.3f, v = %.3f\n", hsv.h, hsv.s, hsv.v);
     rgb_t rgb = hsv_to_rgb(hsv);
-    printf("r = %.3f, g = %.3f, b = %.3f\n", rgb.r, rgb.g, rgb.b);
-    return {(uint8_t)(rgb.r * 0xFF), (uint8_t)(rgb.g * 0xFF), (uint8_t)(rgb.b * 0xFF)};
+    // printf("r = %.3f, g = %.3f, b = %.3f\n", rgb.r, rgb.g, rgb.b);
+    return (uint8_t)(rgb.r * 0xFF) | ((uint8_t)(rgb.g * 0xFF) << 8) |
+           ((uint8_t)(rgb.b * 0xFF) << 16);
 }
 
-rgb8_t num_color(uint64_t n) {
+uint32_t num_color(uint64_t n) {
     if (!n) {
         return hsv_to_rgb8(hsv_t{0, 1, 1});
     }
@@ -90,6 +91,6 @@ rgb8_t num_color(uint64_t n) {
     picosha2::hash256(&n, &n + 1, rand_bytes, rand_bytes + sizeof(rand_bytes));
     uint64_t hashed = *(uint64_t *)rand_bytes;
     double scaled   = hashed / (double)UINT64_MAX;
-    scaled          = 0.1 + (scaled * 0.8);
+    scaled          = 0.1 + (scaled * 0.4);
     return hsv_to_rgb8(hsv_t{scaled, 1, 1});
 }
