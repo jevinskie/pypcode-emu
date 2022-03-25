@@ -1129,7 +1129,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         assert isinstance(fmt, str)
         fmt_str = fmt
 
-        def fix_fmt(match: re.Match):
+        def fix_fmt(match: re.Match) -> str:
             nonlocal match_num, args, idx_color
             arg = args[match_num]
             if match.group(1):
@@ -1167,7 +1167,7 @@ class LLVMELFLifter(ELFPCodeEmu):
 
             return res
 
-        fmt = self.strpool[re.sub(PRINTF_FMT_RE, fix_fmt, fmt_str)]
+        fmt = self.strpool[PRINTF_FMT_RE.sub(fix_fmt, fmt_str)]
 
         arg_ins_idx = [idx + off for idx, off in zip(idx_color, range(len(idx_color)))]
 
