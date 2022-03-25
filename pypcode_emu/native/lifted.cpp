@@ -54,7 +54,7 @@ void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc) {
 
 // https://gist.github.com/ditServices/ba3ebabab499afd1056daf828225247f
 
-rgb_t hsv_to_rgb(hsv_t hsv) {
+static rgb_t hsv_to_rgb(hsv_t hsv) {
     if (hsv.s == 0.0) {
         return {hsv.v, hsv.v, hsv.v};
     }
@@ -79,13 +79,28 @@ rgb_t hsv_to_rgb(hsv_t hsv) {
     return rgb;
 }
 
-uint32_t hsv_to_rgb8(hsv_t hsv) {
+static uint32_t hsv_to_rgb_packed(hsv_t hsv) {
     rgb_t rgb = hsv_to_rgb(hsv);
     return (uint8_t)(rgb.r * 0xFF) | ((uint8_t)(rgb.g * 0xFF) << 8) |
            ((uint8_t)(rgb.b * 0xFF) << 16);
 }
 
+static rgb8_t hsv_to_rgb8(hsv_t hsv) {
+    rgb_t rgb = hsv_to_rgb(hsv);
+    return {(uint8_t)(rgb.r * 0xFF), (uint8_t)(rgb.g * 0xFF), (uint8_t)(rgb.b * 0xFF)};
+}
+
 uint32_t num_color(uint64_t n) {
+    if (!n) {
+        return hsv_to_rgb_packed(hsv_t{0, 1, 1});
+    }
+    uint64_t hashed = XXH64(&n, sizeof(n), 0);
+    double scaled   = hashed / (double)UINT64_MAX;
+    scaled          = 0.1 + (scaled * 0.4);
+    return hsv_to_rgb_packed(hsv_t{scaled, 1, 1});
+}
+
+rgb8_t num_color_rgb8(uint64_t n) {
     if (!n) {
         return hsv_to_rgb8(hsv_t{0, 1, 1});
     }

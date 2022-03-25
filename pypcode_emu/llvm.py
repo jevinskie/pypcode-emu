@@ -1451,11 +1451,14 @@ class LLVMELFLifter(ELFPCodeEmu):
             p('#include "lifted-regs.h"')
             p()
             p("#include <fmt/format.h>")
-            p("#include <fmt/color.h>")
             p("using namespace fmt;")
+            p()
+            p('#include "lifted.h"')
             p()
             p("regs_t regs_dbginfo_dummy;")
             p()
+
+            rgb_str = f"\x1b[38;2;%u;%u;%um"
 
             def gen_reg_dump_func(func_name: str, alias_func=lambda n: n):
                 p(f"void {func_name}(regs_t *regs) {{")
@@ -1464,8 +1467,10 @@ class LLVMELFLifter(ELFPCodeEmu):
                         [f"{alias_func(n):{max_name_len}s}: {{}}" for n in rnames]
                     )
                     fmt_args = [
-                        f"format(fg(regs->{n} ? color::pale_green : color::slate_blue), "
-                        + f'"{{:#0{self.ctx.get_register(n).size * 2 + 2}x}}", regs->{n})'
+                        f'format("\x1b[38;2;{{:d}};{{:d}};{{:d}}m'
+                        + f'{{:#0{self.ctx.get_register(n).size * 2 + 2}x}}{cf.reset}",'
+                        + f"num_color_rgb8(regs->{n}).r, num_color_rgb8(regs->{n}).g, num_color_rgb8(regs->{n}).b,"
+                        + f" regs->{n})"
                         for n in rnames
                     ]
                     p(f'    print("{fmt_str}\\n", {", ".join(fmt_args)});')
