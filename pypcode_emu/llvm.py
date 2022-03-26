@@ -1581,16 +1581,13 @@ class LLVMELFLifter(ELFPCodeEmu):
             CXXFLAGS += ["-fsanitize=address", "-fno-omit-frame-pointer"]
             LDFLAGS += ["-fsanitize=address", "-fno-omit-frame-pointer"]
         if msan:
-            CXXFLAGS += [
+            msan_flags = [
                 "-fsanitize=memory",
                 "-fsanitize-memory-track-origins=2",
                 "-fno-omit-frame-pointer",
             ]
-            LDFLAGS += [
-                "-fsanitize=memory",
-                "-fsanitize-memory-track-origins=2",
-                "-fno-omit-frame-pointer",
-            ]
+            CXXFLAGS += msan_flags
+            LDFLAGS += msan_flags
 
         CXX(*CXXFLAGS, "-c", "-o", harness_o, harness_cpp)
         CXX(*CXXFLAGS, "-c", "-o", harness_s, "-S", harness_cpp, "-g0")
