@@ -87,7 +87,6 @@ class IntVal(ObjectProxy):
             assert False
             v = v.w
         super().__init__(v)
-        print(self.sizee)
         self._self_space = space
         if concrete is None and self.is_const:
             try:
@@ -145,13 +144,9 @@ class IntVal(ObjectProxy):
     @property
     def size(self) -> int:
         assert self.type is not i1
-        return {i8: 1, i16: 2, i32: 4, i64: 8, ir.PointerType: self.ctx.iptr.size}[
+        return {i8: 1, i16: 2, i32: 4, i64: 8, ir.PointerType: self.ctx.byteness}[
             self.type
         ]
-
-    @property
-    def sizee(self):
-        return 2
 
     @property
     def is_const(self) -> bool:
@@ -165,46 +160,12 @@ class IntVal(ObjectProxy):
     def has_const_ops(self):
         return isinstance(self, ir.values._ConstOpMixin)
 
-    # def __hash__(self):
-    #     if isinstance(self.w,
-
-    def comp_time_eq(self, other: IntVal) -> bool:
-        raise NotImplementedError
-        if self.is_const and other.is_const:
-            return self.conc.strict_eq(other.conc)
-        if len(self.exprs) != len(other.exprs):
-            return False
-
-        def rec_eq(a, b):
-            if isinstance(a, tuple):
-                if not isinstance(b, tuple):
-                    return False
-                if len(a) != len(b):
-                    return False
-
-                for a_sub, b_sub in zip(a, b):
-                    if not rec_eq(a_sub, b_sub):
-                        return False
-                return True
-            elif isinstance(a, str):
-                if not isinstance(b, str):
-                    return False
-                return a == b
-            elif isinstance(a, ir.NamedValue):
-                if not isinstance(b, ir.NamedValue):
-                    return False
-                return a.name == b.name
-            else:
-                return a.comp_time_eq(b)
-
-        return rec_eq(self.exprs, other.exprs)
-
     def sext(self, size: int) -> IntVal:
         if self.is_const:
             val = self.w.sext(ibN(size))
             c = self.conc.sext(size * 8)
             return type(self)(val, space=self.space, concrete=c)
-        exprs = ("sext", self.exprs)
+        exprs = ("sext", size, self.exprs)
         return type(self)(
             self.ctx.bld.sext(self, ibN(size), name="sext"),
             space=self.space,
@@ -216,23 +177,28 @@ class IntVal(ObjectProxy):
             val = self.w.zext(ibN(size))
             c = self.conc.zext(size * 8)
             return type(self)(val, space=self.space, concrete=c)
-        exprs = ("zext", self.exprs)
+        exprs = ("zext", size, self.exprs)
         return type(self)(
             self.ctx.bld.zext(self, ibN(size), name="zext"),
             space=self.space,
             exprs=exprs,
         )
 
+    def trunc(self, size: int) -> IntVal:
+        if self.is_const:
+            c = self.conc.as_u & ((1 << (size * 8)) - 1)
+            return type(self)(ibN(size)(c), space=self.space, concrete=c)
+        exprs = ("trunc", size, self.exprs)
+        return type(self)(
+            self.ctx.bld.trunc(self, ibN(size)), space=self.space, exprs=exprs
+        )
+
     # these are dummy since, unlike python, everything is 2's compliment
     def s2u(self) -> IntVal:
         raise NotImplementedError
-        print(f"s2u: {self}")
-        return self
 
     def u2s(self) -> IntVal:
         raise NotImplementedError
-        print(f"u2s: {self}")
-        return self
 
     def bin_op(
         self,
@@ -304,8 +270,8 @@ class IntVal(ObjectProxy):
     def scarry(self, other: IntVal) -> IntVal:
         if self.is_const and other.is_const:
             s = self.conc.as_s + other.conc.as_s
-            int_min = -(1 << (self.sizee * 8 - 1))
-            int_max = (1 << (self.sizee * 8 - 1)) - 1
+            int_min = -(1 << (self.size * 8 - 1))
+            int_max = (1 << (self.size * 8 - 1)) - 1
             val = 1 if not int_min <= s <= int_max else 0
             return type(self)(i8(val), space=self.cmn_space(other), concrete=uint8(val))
         ovf_struct = self.ctx.bld.call(
@@ -318,6 +284,17 @@ class IntVal(ObjectProxy):
             space=self.cmn_space(other),
             exprs=exprs,
         )
+
+    def subpiece(self, nbytes_discard: IntVal, out_size: int) -> IntVal:
+        # return (sext(v, nbytes_in) >> (nbytes_trunc * 8)) & ((1 << (nbytes_out * 8)) - 1)
+        if self.is_const and nbytes_discard.is_const:
+            res_unmasked = self.conc.as_u >> (nbytes_discard.conc.as_u * 8)
+            res = res_unmasked & ((1 << (out_size * 8)) - 1)
+            return type(self)(
+                ibN(out_size)(res), space=self.space, concrete=uintN(out_size)(res)
+            )
+        res_unmasked = self >> (nbytes_discard * type(self)(self.type(8)))
+        return res_unmasked.trunc(out_size)
 
     def bitcast(self, new_ty: ir.Type) -> IntVal:
         if self.is_const:
@@ -1304,6 +1281,8 @@ class LLVMELFLifter(ELFPCodeEmu):
     def gen_bswap(self, val: ir.Value) -> ir.Value:
         if self.bitness == self.host_bitness:
             return val
+        if val.type is i8:
+            return val
         name = f"{val.name}.bswap" if isinstance(val, ir.NamedValue) else "bswap"
         return self.bld.call(self.intrinsics.bswap[val.type], [val], name=name)
 
@@ -1391,7 +1370,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             reg_setter = self.setter_for_varnode(vn, force=True)
             dirty_val = self.sctx.written_regs[vn.offset : vn.offset + vn.size]
             reg_setter(dirty_val)
-            dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
+            # dprint(f"name: {rname:4} vn: {str(vn):16} val: {dirty_val}")
 
     def write_diritied_mem(self):
         for virt_store_addr, v in self.sctx.written_mem.values():
