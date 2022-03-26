@@ -1211,7 +1211,14 @@ class LLVMELFLifter(ELFPCodeEmu):
         op_cb = ir.Function(self.m, op_cb_t, "op_cb")
         callother_cb_t = ir.FunctionType(
             void,
-            [self.iptr, self.iptr, self.mem_t, self.regs_t.as_pointer(), self.iptr],
+            [
+                self.iptr,
+                self.iptr,
+                self.mem_t,
+                self.regs_t.as_pointer(),
+                self.iptr,
+                self.iptr,
+            ],
         )
         callother_cb = ir.Function(self.m, callother_cb_t, "callother_cb")
         return instr_cb, op_cb, callother_cb
@@ -1437,7 +1444,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             bb_func = self.addr2bb[self.addr2bb_idx(addr)]
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
-        # self.compile(opt=self.opt_level, asan=self.asan, msan=self.msan)
+        self.compile(opt=self.opt_level, asan=self.asan, msan=self.msan)
 
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))
@@ -1536,10 +1543,16 @@ class LLVMELFLifter(ELFPCodeEmu):
         lifted_bc_opt_s = lifted_bc_ll + ".opt.s"
 
         lifted_cpp = native_dir / "lifted.cpp"
-        lifted_base = Path("build") / lifted_cpp.name
+        lifted_base = build_dir / lifted_cpp.name
         lifted_o = lifted_base + ".o"
         lifted_ll = lifted_base + ".ll"
         lifted_s = lifted_base + ".s"
+
+        intr_cpp = native_dir / "lifted-interrupts.cpp"
+        intr_base = build_dir / intr_cpp.name
+        intr_o = intr_base + ".o"
+        intr_ll = intr_base + ".ll"
+        intr_s = intr_base + ".s"
 
         lifted_segs_s = build_dir / "lifted-segs.s"
         self.gen_segs(lifted_segs_s)
@@ -1638,6 +1651,10 @@ class LLVMELFLifter(ELFPCodeEmu):
         CXX(*CXXFLAGS, "-c", "-o", lifted_s, "-S", lifted_cpp, "-g0")
         CXX(*CXXFLAGS, "-c", "-o", lifted_ll, "-S", "-emit-llvm", lifted_cpp, "-g0")
 
+        CXX(*CXXFLAGS, "-c", "-o", intr_o, intr_cpp)
+        CXX(*CXXFLAGS, "-c", "-o", intr_s, "-S", intr_cpp, "-g0")
+        CXX(*CXXFLAGS, "-c", "-o", intr_ll, "-S", "-emit-llvm", intr_cpp, "-g0")
+
         CXX(
             *LDFLAGS,
             "-o",
@@ -1645,6 +1662,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             lifted_bc_o,
             harness_o,
             lifted_o,
+            intr_o,
             lifted_regs_o,
             lifted_segs_o,
             *LIBS,

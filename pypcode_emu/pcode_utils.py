@@ -9,7 +9,6 @@ def colorize_pcode_nums(pcode) -> str:
     pcode = str(pcode)
 
     def xfrm(m: re.Match) -> str:
-        print(m.groups())
         nstr = m.group(2)
         suffix = m.group(3) if m.group(3) else ""
         if m.group(3) is not None and m.group(4) is None:

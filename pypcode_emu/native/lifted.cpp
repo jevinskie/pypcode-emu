@@ -52,6 +52,20 @@ void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc) {
           desc);
 }
 
+void callother_cb(uptr bb, uptr pc, u8 *mem, regs_t *regs, usz idx, usz arg) {
+    print("{} ]> {} CALLOTHER callback idx: {:d} arg: {:#010x}\n",
+          format(fg(color::fuchsia), "{:#010x}", bb), format(fg(color::lawn_green), "{:#010x}", pc),
+          idx, arg);
+    switch (idx) {
+    case (usz)callother_calls::software_interrupt:
+        software_interrupt(bb, pc, mem, regs, arg);
+        break;
+    default:
+        assert(!"Unhandled CALLOTHER call index");
+        break;
+    }
+}
+
 // https://gist.github.com/ditServices/ba3ebabab499afd1056daf828225247f
 
 static rgb_t hsv_to_rgb(hsv_t hsv) {
