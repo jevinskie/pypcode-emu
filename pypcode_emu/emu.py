@@ -4,6 +4,7 @@ import collections.abc
 import mmap
 import struct
 import time
+from functools import cached_property
 from typing import ClassVar, Optional, Sequence, Type, Union
 
 import untangle
@@ -175,7 +176,7 @@ class PCodeEmu:
         self.init_reg_state()
         self.last_csmith_checksum = None
 
-    @property
+    @cached_property
     def reg_aliases(self):
         return UniqueBiDict(
             {
@@ -441,7 +442,7 @@ class PCodeEmu:
             raise NotImplementedError(vn.space.name)
 
     def emu_pcodeop(self, op: PcodeOp) -> tuple[Optional[int], bool]:
-        dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
+        # dprint(f"emu_pcodeop: {op.seq.uniq:3} {str(op)}")
         opc = op.opcode
         if opc is OpCode.INT_SEXT:
             # FIXME: was: op.d(sext(op.a(), op.aa.size))

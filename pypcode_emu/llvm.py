@@ -7,6 +7,7 @@ import platform
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Callable, ClassVar, Optional, Type, Union
 
 from bidict import bidict
@@ -83,9 +84,6 @@ class IntVal(ObjectProxy):
         exprs: Optional[tuple] = None,
     ):
         assert not isinstance(v, ObjectProxy)
-        if isinstance(v, IntVal) and isinstance(v, ObjectProxy):
-            assert False
-            v = v.w
         super().__init__(v)
         self._self_space = space
         if concrete is None and self.is_const:
@@ -105,7 +103,6 @@ class IntVal(ObjectProxy):
         if exprs is None:
             if concrete is not None:
                 self._self_exprs = (concrete,)
-            # elif isinstance(self.w, vv)
             else:
                 self._self_exprs = (self,)
         else:
@@ -121,6 +118,12 @@ class IntVal(ObjectProxy):
 
     def __repr__(self):
         return f"<IntVal for {repr(self.w)}>"
+
+    def __hash__(self) -> int:
+        if hasattr(self.w, "__hash__"):
+            return self.w.__hash__()
+        else:
+            return hash(id(self))
 
     def cmn_space(self, other: IntVal) -> Optional[AddrSpace]:
         if self.space is other.space:
@@ -143,7 +146,8 @@ class IntVal(ObjectProxy):
 
     @property
     def size(self) -> int:
-        assert self.type is not i1
+        # Let the KeyError handle this assertion
+        # assert self.type is not i1
         return {i8: 1, i16: 2, i32: 4, i64: 8, ir.PointerType: self.ctx.byteness}[
             self.type
         ]
@@ -570,8 +574,9 @@ class LLVMELFLifter(ELFPCodeEmu):
             }
         )
 
-    @property
+    @cached_property
     def host_bitness(self):
+        # cached_property because apparently platform.architecture() spawns a process -_-
         return {
             "32bit": 32,
             "64bit": 64,
@@ -1354,7 +1359,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         for instr in instrs:
             inst_addr = instr.address.offset
             self.cur_pc_addr = inst_addr
-            self.dump(instr)
+            # self.dump(instr)
 
             for i, op in enumerate(instr.ops):
                 assert i == op.seq.uniq
@@ -1433,7 +1438,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             bb_func = self.addr2bb[self.addr2bb_idx(addr)]
             self.gen_untrans_panic_call(addr, bb_func)
         self.init_addr2bb()
-        self.compile(opt=self.opt_level, asan=self.asan, msan=self.msan)
+        # self.compile(opt=self.opt_level, asan=self.asan, msan=self.msan)
 
     def write_ir(self, asm_out_path):
         open(asm_out_path, "w").write(str(self.m))
