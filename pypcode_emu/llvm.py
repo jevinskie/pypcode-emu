@@ -801,8 +801,7 @@ class LLVMELFLifter(ELFPCodeEmu):
                         )
                     arname = self.alias_reg(rname)
                     res_v = self.bld.load(gep, name=arname)
-                    exprs = ("reg", f"{arname}_{sctx.reg_gens[arname]}")
-                    res = self.int_t(res_v, space=self.reg_space, exprs=exprs)
+                    res = self.int_t(res_v, space=self.reg_space)
                     sctx.regs[vn.offset : vn.offset + vn.size] = res
                 if self.trace:
                     pretty_name = self.alias_reg(vn.get_register_name())
