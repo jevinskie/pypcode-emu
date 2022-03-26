@@ -7,6 +7,8 @@
 
 constexpr int bytes_per_instr = 4;
 
+enum class callother_calls { software_interrupt = 0, };
+
 using seg_t = struct {
     uptr addr;
     usz size;
@@ -27,6 +29,8 @@ void bb_caller(uptr addr, u8 *mem, regs_t *regs);
 
 void instr_cb(uptr bb, uptr pc, const char *asm_mnem, const char *asm_body);
 void op_cb(uptr bb, uptr pc, uint32_t op_idx, uint32_t opc, const char *desc);
+void callother_cb(uptr bb, uptr pc, u8 *mem, regs_t *regs, usz idx, usz arg);
+void software_interrupt(uptr bb, uptr pc, u8 *mem, regs_t *regs, usz arg);
 void untrans_panic(uptr pc);
 uint32_t num_color(uint64_t n);
 rgb8_t num_color_rgb8(uint64_t n);

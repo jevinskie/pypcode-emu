@@ -479,6 +479,9 @@ class LLVMELFLifter(ELFPCodeEmu):
         list[tuple[str, tuple, Optional[str], ir.Block, Optional[ir.Instruction]]]
     ]
     num_color: ir.Function
+    cur_bb_addr: Optional[int]
+    cur_pc_addr: Optional[int]
+    callother_cb: ir.Function
 
     def __init__(
         self,
@@ -546,7 +549,7 @@ class LLVMELFLifter(ELFPCodeEmu):
             self.isz = i64
 
         self.untrans_panic = self.gen_utrans_panic_decl()
-        self.instr_cb, self.op_cb = self.gen_cb_decls()
+        self.instr_cb, self.op_cb, self.callother_cb = self.gen_cb_decls()
         self.regs_dump, self.regs_dump_alias = self.gen_regs_dump_decls()
 
         debugtrap_t = ir.FunctionType(void, [])
@@ -555,6 +558,7 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.gen_text_addrs()
         self.gen_addr2bb()
         self.bb_caller = self.gen_bb_caller()
+        self.cur_bb_addr, self.cur_pc_addr = None, None
 
     def init_reg_state(self):
         self.init_ir_regs(
@@ -942,7 +946,19 @@ class LLVMELFLifter(ELFPCodeEmu):
         return None, True
 
     def handle_callother(self, op: PcodeOp):
-        raise NotImplementedError
+        self.bld.call(
+            self.callother_cb,
+            [
+                self.iptr(self.cur_bb_addr),
+                self.iptr(self.cur_pc_addr),
+                self.mem_lv,
+                self.regs_lv,
+                op.a(),
+                op.b(),
+            ],
+            name="callother_cb",
+        )
+        return None, False
 
     def gen_bb_caller(self) -> ir.Function:
         fty = ir.FunctionType(void, [self.iptr, self.mem_t, self.regs_t.as_pointer()])
@@ -1189,7 +1205,12 @@ class LLVMELFLifter(ELFPCodeEmu):
             void, [self.iptr, self.iptr, i32, i32, i8.as_pointer()]
         )
         op_cb = ir.Function(self.m, op_cb_t, "op_cb")
-        return instr_cb, op_cb
+        callother_cb_t = ir.FunctionType(
+            void,
+            [self.iptr, self.iptr, self.mem_t, self.regs_t.as_pointer(), self.iptr],
+        )
+        callother_cb = ir.Function(self.m, callother_cb_t, "callother_cb")
+        return instr_cb, op_cb, callother_cb
 
     def gen_debugtrap(self):
         self.bld.call(self.debugtrap, [], name="debugtrap")
@@ -1328,9 +1349,11 @@ class LLVMELFLifter(ELFPCodeEmu):
         self.regs_lv.attributes.add("noalias")
         self.bld.position_at_end(entry_bb)
         self.mem_base_lv = self.bld.ptrtoint(self.mem_lv, i64, name="mem_base_int")
+        self.cur_bb_addr = addr
 
         for instr in instrs:
             inst_addr = instr.address.offset
+            self.cur_pc_addr = inst_addr
             self.dump(instr)
 
             for i, op in enumerate(instr.ops):
@@ -1360,6 +1383,9 @@ class LLVMELFLifter(ELFPCodeEmu):
                 space=self.const_space,
             )
             self.gen_bb_caller_call(next_pc)
+
+        self.cur_pc_addr = None
+        self.cur_bb_addr = None
 
         return f
 
